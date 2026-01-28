@@ -1,0 +1,41 @@
+name: "Bug"
+description: "Bug report"
+labels: ["type/refactor"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 不具合の概要
+  - type: textarea
+    id: summary
+    attributes:
+      label: 概要
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 再現手順
+      placeholder: |
+        1.
+        2.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待結果
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 実際の結果
+  - type: textarea
+    id: env
+    attributes:
+      label: 環境
+  - type: textarea
+    id: impact
+    attributes:
+      label: 影響範囲

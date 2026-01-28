@@ -1,0 +1,38 @@
+name: "Feature"
+description: "New feature"
+labels: ["type/feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 目的
+  - type: textarea
+    id: purpose
+    attributes:
+      label: 目的
+      description: 何を実現したいか
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 受け入れ条件
+      description: Doneの条件
+      placeholder: |
+        - [ ] 
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: スコープ/非スコープ
+      description: やること/やらないこと
+  - type: textarea
+    id: deps
+    attributes:
+      label: 依存関係
+      description: 依存Issue番号など
+  - type: textarea
+    id: notes
+    attributes:
+      label: 補足

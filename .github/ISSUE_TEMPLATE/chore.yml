@@ -1,0 +1,21 @@
+name: "Chore"
+description: "Maintenance / chore"
+labels: ["type/chore"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: 概要
+      description: やることの概要
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 受け入れ条件
+      placeholder: |
+        - [ ] 
+  - type: textarea
+    id: notes
+    attributes:
+      label: 補足

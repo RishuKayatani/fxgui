@@ -1,0 +1,24 @@
+name: "Research"
+description: "Investigation / spike"
+labels: ["type/research"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: 調査目的
+      description: 何を明らかにしたいか
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 調査範囲
+  - type: textarea
+    id: output
+    attributes:
+      label: 成果物
+      description: ドキュメント、PoCなど
+  - type: textarea
+    id: notes
+    attributes:
+      label: 補足
