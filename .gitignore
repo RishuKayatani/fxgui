@@ -33,3 +33,15 @@ Thumbs.db
 
 # Tauri generated
 /src-tauri/gen/
+# Node
+node_modules/
+
+# Tauri build
+/src-tauri/target/
+/src-tauri/.cargo/
+
+# Logs
+npm-debug.log*
+
+# OS
+.DS_Store
