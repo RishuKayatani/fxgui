@@ -1,0 +1,3 @@
+[submodule "core/fxlib"]
+	path = core/fxlib
+	url = git@github.com:RishuKayatani/fxlib.git
