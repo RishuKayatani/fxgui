@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import "./App.css";
 
 const splitOptions = [1, 2, 4];
+const speedOptions = [0.5, 1, 2, 5, 10];
 
 function App() {
   const [split, setSplit] = useState(2);
@@ -12,6 +13,10 @@ function App() {
       pair: "USD/JPY",
       timeframe: "M1",
       indicator: "MA",
+      playing: false,
+      speed: 1,
+      seek: 0,
+      bars: 240,
     }))
   );
 
@@ -22,6 +27,8 @@ function App() {
       prev.map((p, i) => (i === idx ? { ...p, ...patch } : p))
     );
   };
+
+  const active = paneState[activePane];
 
   return (
     <div className="app-shell">
@@ -45,12 +52,25 @@ function App() {
           </div>
         </div>
         <div className="topbar-right">
-          <button type="button" className="ghost">
-            再生
+          <button
+            type="button"
+            className={active.playing ? "ghost active" : "ghost"}
+            onClick={() => updatePane(activePane, { playing: !active.playing })}
+          >
+            {active.playing ? "一時停止" : "再生"}
           </button>
-          <button type="button" className="ghost">
-            速度 1x
-          </button>
+          <div className="speed-group">
+            {speedOptions.map((value) => (
+              <button
+                key={value}
+                type="button"
+                className={active.speed === value ? "ghost active" : "ghost"}
+                onClick={() => updatePane(activePane, { speed: value })}
+              >
+                {value}x
+              </button>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -73,14 +93,15 @@ function App() {
 
         <main
           className={`chart-area split-${split}`}
-          style={{ gridTemplateColumns: split === 1 ? "1fr" : split === 2 ? "1fr 1fr" : "1fr 1fr" }}
+          style={{
+            gridTemplateColumns:
+              split === 1 ? "1fr" : split === 2 ? "1fr 1fr" : "1fr 1fr",
+          }}
         >
           {panes.map((pane, idx) => (
             <section
               key={pane.id}
-              className={
-                idx === activePane ? "chart-pane active" : "chart-pane"
-              }
+              className={idx === activePane ? "chart-pane active" : "chart-pane"}
               onClick={() => setActivePane(idx)}
             >
               <div className="pane-header">
@@ -90,7 +111,10 @@ function App() {
               <div className="pane-body">
                 <div className="chart-placeholder">Chart</div>
               </div>
-              <div className="pane-footer">{pane.indicator}</div>
+              <div className="pane-footer">
+                {pane.indicator}
+                <span className="seek-label">{pane.seek} / {pane.bars}</span>
+              </div>
             </section>
           ))}
         </main>
@@ -100,11 +124,16 @@ function App() {
           <div className="setting-block">
             <label>足の種類</label>
             <div className="segmented">
-              {["M1", "M5", "H1", "D1"].map((tf) => (
+              {[
+                "M1",
+                "M5",
+                "H1",
+                "D1",
+              ].map((tf) => (
                 <button
                   key={tf}
                   type="button"
-                  className={paneState[activePane].timeframe === tf ? "active" : ""}
+                  className={active.timeframe === tf ? "active" : ""}
                   onClick={() => updatePane(activePane, { timeframe: tf })}
                 >
                   {tf}
@@ -115,17 +144,34 @@ function App() {
           <div className="setting-block">
             <label>インジケーター</label>
             <div className="segmented">
-              {["MA", "RSI", "MACD"].map((ind) => (
+              {[
+                "MA",
+                "RSI",
+                "MACD",
+              ].map((ind) => (
                 <button
                   key={ind}
                   type="button"
-                  className={paneState[activePane].indicator === ind ? "active" : ""}
+                  className={active.indicator === ind ? "active" : ""}
                   onClick={() => updatePane(activePane, { indicator: ind })}
                 >
                   {ind}
                 </button>
               ))}
             </div>
+          </div>
+          <div className="setting-block">
+            <label>シーク</label>
+            <input
+              type="range"
+              min="0"
+              max={active.bars}
+              value={active.seek}
+              onChange={(e) =>
+                updatePane(activePane, { seek: Number(e.target.value) })
+              }
+            />
+            <div className="seek-meta">{active.seek} / {active.bars} bars</div>
           </div>
         </aside>
       </div>
