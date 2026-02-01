@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { open } from "@tauri-apps/api/dialog";
 import { invoke } from "@tauri-apps/api/core";
+import ChartCanvas from "./ChartCanvas";
 import "./App.css";
 
 const splitOptions = [1, 2, 4];
@@ -28,6 +29,9 @@ function App() {
   const [ingestInfo, setIngestInfo] = useState(null);
   const [ingestError, setIngestError] = useState("");
   const [ingestLoading, setIngestLoading] = useState(false);
+  const [candles, setCandles] = useState([]);
+  const [viewBars, setViewBars] = useState(240);
+  const [viewOffset, setViewOffset] = useState(0);
 
   const panes = useMemo(() => paneState.slice(0, split), [paneState, split]);
   const active = paneState[activePane];
@@ -86,6 +90,9 @@ function App() {
         rows: result.dataset.candles.length,
         usedCache: result.used_cache,
       });
+      setCandles(result.dataset.candles);
+      setViewBars(Math.min(240, result.dataset.candles.length || 240));
+      setViewOffset(0);
       updatePane(activePane, { bars: result.dataset.candles.length, seek: 0 });
     } catch (err) {
       setIngestError(String(err));
@@ -196,9 +203,18 @@ function App() {
                 <span>{pane.timeframe}</span>
               </div>
               <div className="pane-body">
-                <div className="chart-placeholder">
-                  {ingestInfo ? `Loaded ${ingestInfo.rows} rows` : "Chart"}
-                </div>
+                <ChartCanvas
+                  candles={candles}
+                  viewBars={viewBars}
+                  viewOffset={viewOffset}
+                  onViewChange={(next) => {
+                    if (next.viewBars !== undefined) setViewBars(next.viewBars);
+                    if (next.viewOffset !== undefined) setViewOffset(next.viewOffset);
+                  }}
+                />
+                {!candles || candles.length === 0 ? (
+                  <div className="chart-overlay">CSVを読み込むと表示されます</div>
+                ) : null}
               </div>
               <div className="pane-footer">
                 {pane.indicator}
