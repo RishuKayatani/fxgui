@@ -49,6 +49,7 @@ function App() {
   const [cacheInfo, setCacheInfo] = useState(null);
   const [datasetHistory, setDatasetHistory] = useState([]);
   const [playbackReady, setPlaybackReady] = useState(false);
+  const [ingestProgress, setIngestProgress] = useState(null);
 
   const panes = useMemo(() => paneState.slice(0, split), [paneState, split]);
   const active = paneState[activePane];
@@ -357,6 +358,7 @@ function App() {
     setIngestError("");
     setPerfWarning("");
     setIngestLoading(true);
+    setIngestProgress(null);
     try {
       const t0 = perfStart();
       const override = typeof overridePath === "string" ? overridePath : null;
@@ -375,50 +377,49 @@ function App() {
       }
       perfLog("dialog.normalize", t1);
       const t2 = perfStart();
-      const result = await invoke("ingest_csv", { path: file });
-      perfLog("ipc.ingest_csv", t2);
+      const quick = await invoke("ingest_csv_quick", { path: file, initialLimit: 240 });
+      perfLog("ipc.ingest_csv_quick", t2);
       const t3 = perfStart();
       await invoke("record_dataset_history", { path: file });
       perfLog("ipc.record_dataset_history", t3);
       setIngestInfo({
-        path: result.dataset.source_path,
-        rows: result.dataset.candles.length,
-        usedCache: result.used_cache,
+        path: quick.source_path,
+        rows: quick.total,
+        usedCache: quick.used_cache,
       });
-      const totalBars = result.dataset.candles.length;
+      const totalBars = quick.total;
       const nextBars = Math.min(240, totalBars || 240);
       const t4 = perfStart();
-      await invoke("compute_indicators", { dataset: result.dataset });
-      perfLog("ipc.compute_indicators", t4);
-      const t5 = perfStart();
-      const initRange = await invoke("dataset_range", {
-        sourcePath: result.dataset.source_path,
-        offset: 0,
-        limit: nextBars,
+      updatePane(activePane, {
+        rawDataset: { source_path: quick.source_path, candles: new Array(totalBars) },
+        candles: quick.initial,
+        viewBars: nextBars,
+        viewOffset: 0,
+        bars: totalBars,
+        seek: 0,
+        indicatorData: [],
       });
-      const initIndicators = await invoke("indicator_range", {
-        sourcePath: result.dataset.source_path,
-        offset: 0,
-        limit: nextBars,
-        indicator: active.indicator,
-      });
-        updatePane(activePane, {
-          rawDataset: result.dataset,
-          candles: initRange.candles,
-          viewBars: nextBars,
-          viewOffset: 0,
-          bars: totalBars,
-          seek: 0,
-          indicatorData: initIndicators.series,
-        });
-        updateRange(activePane, 0, nextBars);
-      perfLog("state.updatePane", t5);
+      setIngestProgress({ done: quick.initial.length, total: totalBars });
+      perfLog("state.updatePane", t4);
       if (totalBars >= 100000) {
         setPerfWarning("大量データ（10万バー以上）です。動作が重くなる可能性があります。");
       }
       perfLog("ingest.total", t0);
       await refreshCacheInfo();
       await refreshDatasetHistory();
+
+      // Background: full ingest + indicators
+      setTimeout(async () => {
+        try {
+          const full = await invoke("ingest_csv", { path: file });
+          await invoke("compute_indicators", { dataset: full.dataset });
+          setIngestProgress({ done: full.dataset.candles.length, total: full.dataset.candles.length });
+          updatePane(activePane, { rawDataset: full.dataset, bars: full.dataset.candles.length });
+          updateRange(activePane, 0, nextBars);
+        } catch (err) {
+          setIngestError(String(err));
+        }
+      }, 0);
     } catch (err) {
       const message = String(err || "読み込みに失敗しました").replace(/^Error:\s*/i, "");
       setIngestError(message);
@@ -558,6 +559,13 @@ function App() {
             <div className="ingest-info">
               <div>rows: {ingestInfo.rows}</div>
               <div>cache: {ingestInfo.usedCache ? "hit (cached)" : "miss (parsed)"}</div>
+            </div>
+          ) : null}
+          {ingestProgress ? (
+            <div className="ingest-info">
+              <div>
+                ingest: {ingestProgress.done} / {ingestProgress.total}
+              </div>
             </div>
           ) : null}
           {perfWarning ? <div className="perf-warning">{perfWarning}</div> : null}
