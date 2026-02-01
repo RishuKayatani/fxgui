@@ -39,7 +39,22 @@ fn record_dataset_history(app: tauri::AppHandle, path: &str) -> Result<(), Strin
 }
 
 #[tauri::command]
-fn compute_indicators(dataset: core::DataSet) -> Result<serde_json::Value, String> {
+fn compute_indicators(
+    app: tauri::AppHandle,
+    dataset: core::DataSet,
+) -> Result<serde_json::Value, String> {
+    let use_cache = !dataset.source_path.trim().is_empty();
+    if use_cache {
+        if let Ok(Some(cached)) = core::load_indicator_cache(
+            &app,
+            &dataset.source_path,
+            dataset.candles.len(),
+            &["ma", "rsi", "macd", "signal", "hist"],
+        ) {
+            return Ok(cached);
+        }
+    }
+
     let start = std::time::Instant::now();
     let closes = indicators::closes_from_candles(&dataset.candles);
     let t_closes = start.elapsed().as_millis();
@@ -58,6 +73,20 @@ fn compute_indicators(dataset: core::DataSet) -> Result<serde_json::Value, Strin
         );
     }
 
+    if use_cache {
+        let _ = core::save_indicator_cache(
+            &app,
+            &dataset.source_path,
+            &[
+                ("ma", ma.clone()),
+                ("rsi", rsi.clone()),
+                ("macd", macd.clone()),
+                ("signal", signal.clone()),
+                ("hist", hist.clone()),
+            ],
+        );
+    }
+
     Ok(serde_json::json!({
         "ma": ma,
         "rsi": rsi,
@@ -68,7 +97,11 @@ fn compute_indicators(dataset: core::DataSet) -> Result<serde_json::Value, Strin
 }
 
 #[tauri::command]
-fn resample_dataset(dataset: core::DataSet, target: String) -> Result<core::DataSet, String> {
+fn resample_dataset(
+    app: tauri::AppHandle,
+    dataset: core::DataSet,
+    target: String,
+) -> Result<core::DataSet, String> {
     let start = std::time::Instant::now();
     let interval = match target.as_str() {
         "M1" => resample::Interval::M1,
@@ -81,7 +114,12 @@ fn resample_dataset(dataset: core::DataSet, target: String) -> Result<core::Data
         _ => return Err("invalid interval".to_string()),
     };
 
-    let resampled = resample::resample(&dataset, interval);
+    if let Ok(Some(cached)) = core::load_resample_cache(&app, &dataset.source_path, &target) {
+        return Ok(cached);
+    }
+
+    let resampled = resample::resample(&dataset, interval)?;
+    let _ = core::save_resample_cache(&app, &dataset.source_path, &target, &resampled);
     if cfg!(debug_assertions) {
         println!(
             "[perf] resample {} total={}ms",
@@ -89,7 +127,7 @@ fn resample_dataset(dataset: core::DataSet, target: String) -> Result<core::Data
             start.elapsed().as_millis()
         );
     }
-    resampled
+    Ok(resampled)
 }
 
 #[tauri::command]
