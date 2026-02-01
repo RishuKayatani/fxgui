@@ -8,6 +8,13 @@ const splitOptions = [1, 2, 4];
 const speedOptions = [0.5, 1, 2, 5, 10];
 const basePlaybackMs = 500;
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+const perfLog = (label, start) => {
+  if (!import.meta.env.DEV) return;
+  const duration = performance.now() - start;
+  // keep logs compact for large datasets
+  console.info(`[perf] ${label}: ${duration.toFixed(1)}ms`);
+};
+const perfStart = () => (import.meta.env.DEV ? performance.now() : 0);
 
 const emptyPane = (idx) => ({
   id: idx,
@@ -306,27 +313,38 @@ function App() {
     setPerfWarning("");
     setIngestLoading(true);
     try {
+      const t0 = perfStart();
       const override = typeof overridePath === "string" ? overridePath : null;
       const dialogResult = override
         || await open({
           multiple: false,
           filters: [{ name: "CSV/TSV", extensions: ["csv", "tsv"] }],
         });
+      perfLog("dialog.open", t0);
+      const t1 = perfStart();
       const file = normalizeDialogPath(dialogResult);
       if (!file) {
         setIngestError("ファイルパスを取得できませんでした。");
         setIngestLoading(false);
         return;
       }
+      perfLog("dialog.normalize", t1);
+      const t2 = perfStart();
       const result = await invoke("ingest_csv", { path: file });
+      perfLog("ipc.ingest_csv", t2);
+      const t3 = perfStart();
       await invoke("record_dataset_history", { path: file });
+      perfLog("ipc.record_dataset_history", t3);
       setIngestInfo({
         path: result.dataset.source_path,
         rows: result.dataset.candles.length,
         usedCache: result.used_cache,
       });
       const nextBars = Math.min(240, result.dataset.candles.length || 240);
+      const t4 = perfStart();
       const indicators = await invoke("compute_indicators", { dataset: result.dataset });
+      perfLog("ipc.compute_indicators", t4);
+      const t5 = perfStart();
       updatePane(activePane, {
         rawDataset: result.dataset,
         candles: result.dataset.candles,
@@ -336,9 +354,11 @@ function App() {
         seek: 0,
         indicatorData: indicators,
       });
+      perfLog("state.updatePane", t5);
       if (result.dataset.candles.length >= 100000) {
         setPerfWarning("大量データ（10万バー以上）です。動作が重くなる可能性があります。");
       }
+      perfLog("ingest.total", t0);
       await refreshCacheInfo();
       await refreshDatasetHistory();
     } catch (err) {
@@ -356,11 +376,16 @@ function App() {
       (active.candles.length ? { source_path: "", candles: active.candles } : null);
     if (!dataset) return;
     try {
+      const t0 = perfStart();
       const resampled = await invoke("resample_dataset", {
         dataset,
         target: nextTf,
       });
+      perfLog("ipc.resample_dataset", t0);
+      const t1 = perfStart();
       const indicators = await invoke("compute_indicators", { dataset: resampled });
+      perfLog("ipc.compute_indicators", t1);
+      const t2 = perfStart();
       const nextBars = Math.min(240, resampled.candles.length || 240);
       updatePane(activePane, {
         candles: resampled.candles,
@@ -370,6 +395,7 @@ function App() {
         seek: 0,
         indicatorData: indicators,
       });
+      perfLog("state.applyTimeframe", t2);
     } catch (err) {
       setIngestError(String(err));
     }

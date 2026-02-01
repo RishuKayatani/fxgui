@@ -40,10 +40,23 @@ fn record_dataset_history(app: tauri::AppHandle, path: &str) -> Result<(), Strin
 
 #[tauri::command]
 fn compute_indicators(dataset: core::DataSet) -> Result<serde_json::Value, String> {
+    let start = std::time::Instant::now();
     let closes = indicators::closes_from_candles(&dataset.candles);
+    let t_closes = start.elapsed().as_millis();
     let ma = indicators::ma(&closes, 14);
+    let t_ma = start.elapsed().as_millis();
     let rsi = indicators::rsi(&closes, 14);
+    let t_rsi = start.elapsed().as_millis();
     let (macd, signal, hist) = indicators::macd(&closes, 12, 26, 9);
+    let t_macd = start.elapsed().as_millis();
+
+    let total = start.elapsed().as_millis();
+    if cfg!(debug_assertions) {
+        println!(
+            "[perf] indicators closes={}ms ma={}ms rsi={}ms macd={}ms total={}ms",
+            t_closes, t_ma, t_rsi, t_macd, total
+        );
+    }
 
     Ok(serde_json::json!({
         "ma": ma,
@@ -56,6 +69,7 @@ fn compute_indicators(dataset: core::DataSet) -> Result<serde_json::Value, Strin
 
 #[tauri::command]
 fn resample_dataset(dataset: core::DataSet, target: String) -> Result<core::DataSet, String> {
+    let start = std::time::Instant::now();
     let interval = match target.as_str() {
         "M1" => resample::Interval::M1,
         "M5" => resample::Interval::M5,
@@ -67,7 +81,15 @@ fn resample_dataset(dataset: core::DataSet, target: String) -> Result<core::Data
         _ => return Err("invalid interval".to_string()),
     };
 
-    resample::resample(&dataset, interval)
+    let resampled = resample::resample(&dataset, interval);
+    if cfg!(debug_assertions) {
+        println!(
+            "[perf] resample {} total={}ms",
+            target,
+            start.elapsed().as_millis()
+        );
+    }
+    resampled
 }
 
 #[tauri::command]

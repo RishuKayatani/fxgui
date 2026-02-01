@@ -18,6 +18,16 @@ Rust + Tauri + React をベースに、`fxlib` を Core ライブラリとして
 - 依存関係をインストール
 - `fxlib` をサブモジュールまたは依存として組み込み
 
+## 計測（デバッグのみ）
+- `npm run tauri dev` 実行中、以下の区間計測がコンソールに出力されます:
+  - `dialog.open` / `dialog.normalize`
+  - `ipc.ingest_csv` / `ipc.record_dataset_history`
+  - `ipc.compute_indicators`
+  - `ipc.resample_dataset`
+  - `state.updatePane` / `state.applyTimeframe`
+  - `render.chart`
+- Rust側は `fxgui.log` に `ingest` / `resample` / `indicators` の計測が出ます（debugビルドのみ）
+
 ## 関連
 - Core ライブラリ: `fxlib`（https://github.com/RishuKayatani/fxlib）
 

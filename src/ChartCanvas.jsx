@@ -84,6 +84,7 @@ export default function ChartCanvas({
   }, []);
 
   useEffect(() => {
+    const t0 = import.meta.env.DEV ? performance.now() : 0;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -191,6 +192,10 @@ export default function ChartCanvas({
       ctx.moveTo(startX, crosshair.y);
       ctx.lineTo(startX + chartWidth, crosshair.y);
       ctx.stroke();
+    }
+    if (import.meta.env.DEV) {
+      const duration = performance.now() - t0;
+      console.info(`[perf] render.chart: ${duration.toFixed(1)}ms`);
     }
   }, [candles, size, viewBars, viewOffset, crosshair, indicatorData, indicatorType, chartType]);
 
