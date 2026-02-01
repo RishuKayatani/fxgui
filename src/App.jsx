@@ -179,7 +179,7 @@ function App() {
           {ingestInfo ? (
             <div className="ingest-info">
               <div>rows: {ingestInfo.rows}</div>
-              <div>cache: {ingestInfo.usedCache ? "hit" : "miss"}</div>
+              <div>cache: {ingestInfo.usedCache ? "hit (cached)" : "miss (parsed)"}</div>
             </div>
           ) : null}
           {ingestError ? <div className="ingest-error">{ingestError}</div> : null}

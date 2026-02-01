@@ -105,21 +105,29 @@ fn parse_csv_like(path: &Path) -> Result<DataSet, String> {
             continue;
         }
         // Allow comments or header-like lines
-        if idx == 0 && line.to_lowercase().contains("timestamp") {
+        let lower = line.to_lowercase();
+        if idx == 0 && (lower.contains("timestamp") || (lower.contains("date") && lower.contains("time"))) {
             continue;
         }
         let parts = split_line(line);
         if parts.len() < 5 {
             return Err(format!("invalid column count at line {}", idx + 1));
         }
-        let ts_raw = parts[0].trim();
+        let (ts_raw, start_idx) = if parts.len() >= 6 && looks_like_date(parts[0]) && looks_like_time(parts[1]) {
+            (format!("{} {}", parts[0].trim(), parts[1].trim()), 2)
+        } else {
+            (parts[0].trim().to_string(), 1)
+        };
         let ts_utc = normalize_timestamp(ts_raw).map_err(|e| format!("{} at line {}", e, idx + 1))?;
-        let open = parse_f64(parts[1]).map_err(|e| format!("{} at line {}", e, idx + 1))?;
-        let high = parse_f64(parts[2]).map_err(|e| format!("{} at line {}", e, idx + 1))?;
-        let low = parse_f64(parts[3]).map_err(|e| format!("{} at line {}", e, idx + 1))?;
-        let close = parse_f64(parts[4]).map_err(|e| format!("{} at line {}", e, idx + 1))?;
-        let volume = if parts.len() >= 6 {
-            parse_f64(parts[5]).map_err(|e| format!("{} at line {}", e, idx + 1))?
+        if parts.len() < start_idx + 4 {
+            return Err(format!("invalid column count at line {}", idx + 1));
+        }
+        let open = parse_f64(parts[start_idx]).map_err(|e| format!("{} at line {}", e, idx + 1))?;
+        let high = parse_f64(parts[start_idx + 1]).map_err(|e| format!("{} at line {}", e, idx + 1))?;
+        let low = parse_f64(parts[start_idx + 2]).map_err(|e| format!("{} at line {}", e, idx + 1))?;
+        let close = parse_f64(parts[start_idx + 3]).map_err(|e| format!("{} at line {}", e, idx + 1))?;
+        let volume = if parts.len() > start_idx + 4 {
+            parse_f64(parts[start_idx + 4]).map_err(|e| format!("{} at line {}", e, idx + 1))?
         } else {
             0.0
         };
@@ -150,17 +158,65 @@ fn split_line(line: &str) -> Vec<&str> {
     }
 }
 
+fn looks_like_date(s: &str) -> bool {
+    let mut parts = s.split('.');
+    let y = parts.next().unwrap_or("");
+    let m = parts.next().unwrap_or("");
+    let d = parts.next().unwrap_or("");
+    !y.is_empty()
+        && !m.is_empty()
+        && !d.is_empty()
+        && y.chars().all(|c| c.is_ascii_digit())
+        && m.chars().all(|c| c.is_ascii_digit())
+        && d.chars().all(|c| c.is_ascii_digit())
+}
+
+fn looks_like_time(s: &str) -> bool {
+    let mut parts = s.split(':');
+    let h = parts.next().unwrap_or("");
+    let m = parts.next().unwrap_or("");
+    let sec = parts.next().unwrap_or("");
+    !h.is_empty()
+        && !m.is_empty()
+        && !sec.is_empty()
+        && h.chars().all(|c| c.is_ascii_digit())
+        && m.chars().all(|c| c.is_ascii_digit())
+        && sec.chars().all(|c| c.is_ascii_digit())
+}
+
 pub fn normalize_timestamp(s: &str) -> Result<String, String> {
     // expected: YYYY.MM.DD H:MM:SS (UTC)
     if let Some((date, time)) = s.split_once(' ') {
         let date = date.replace('.', "-");
+        let time = normalize_time(time)?;
         return Ok(format!("{}T{}Z", date, time));
     }
     if let Some((date, time)) = s.split_once('\t') {
         let date = date.replace('.', "-");
+        let time = normalize_time(time)?;
         return Ok(format!("{}T{}Z", date, time));
     }
     Err("invalid timestamp format".to_string())
+}
+
+fn normalize_time(time: &str) -> Result<String, String> {
+    let mut parts = time.trim().split(':');
+    let h = parts.next().ok_or_else(|| "invalid time format".to_string())?;
+    let m = parts.next().ok_or_else(|| "invalid time format".to_string())?;
+    let s = parts.next().ok_or_else(|| "invalid time format".to_string())?;
+    if !h.chars().all(|c| c.is_ascii_digit())
+        || !m.chars().all(|c| c.is_ascii_digit())
+        || !s.chars().all(|c| c.is_ascii_digit())
+    {
+        return Err("invalid time format".to_string());
+    }
+    let h = h.parse::<u32>().map_err(|_| "invalid time format".to_string())?;
+    let m = m.parse::<u32>().map_err(|_| "invalid time format".to_string())?;
+    let s = s.parse::<u32>().map_err(|_| "invalid time format".to_string())?;
+    if h > 23 || m > 59 || s > 59 {
+        return Err("invalid time format".to_string());
+    }
+    Ok(format!("{:02}:{:02}:{:02}", h, m, s))
 }
 
 fn parse_f64(s: &str) -> Result<f64, String> {
