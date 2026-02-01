@@ -41,6 +41,7 @@ function App() {
   const [perfWarning, setPerfWarning] = useState("");
   const [cacheInfo, setCacheInfo] = useState(null);
   const [datasetHistory, setDatasetHistory] = useState([]);
+  const [playbackReady, setPlaybackReady] = useState(false);
 
   const panes = useMemo(() => paneState.slice(0, split), [paneState, split]);
   const active = paneState[activePane];
@@ -135,6 +136,36 @@ function App() {
       })
     );
   }, [active.seek, activePane, maxBars, syncEnabled]);
+
+  useEffect(() => {
+    const restore = async () => {
+      if (playbackReady) return;
+      const state = await invoke("load_playback_state");
+      if (state) {
+        updatePane(activePane, {
+          seek: state.seek ?? 0,
+          speed: state.speed ?? 1,
+          playing: state.playing ?? false,
+        });
+      }
+      setPlaybackReady(true);
+    };
+    restore();
+  }, [activePane, playbackReady]);
+
+  useEffect(() => {
+    if (!playbackReady) return;
+    const save = async () => {
+      await invoke("save_playback_state", {
+        state: {
+          seek: active.seek,
+          speed: active.speed,
+          playing: active.playing,
+        },
+      });
+    };
+    save();
+  }, [active.seek, active.speed, active.playing, playbackReady]);
 
   useEffect(() => {
     const handler = (event) => {

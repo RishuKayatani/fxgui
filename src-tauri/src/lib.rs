@@ -90,6 +90,19 @@ fn load_preset(app: tauri::AppHandle, name: &str) -> Result<presets::Preset, Str
     presets::load_preset(&app, name)
 }
 
+#[tauri::command]
+fn save_playback_state(
+    app: tauri::AppHandle,
+    state: presets::PlaybackState,
+) -> Result<(), String> {
+    presets::save_playback(&app, state)
+}
+
+#[tauri::command]
+fn load_playback_state(app: tauri::AppHandle) -> Result<Option<presets::PlaybackState>, String> {
+    presets::load_playback(&app)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -105,7 +118,9 @@ pub fn run() {
             list_presets,
             save_preset,
             delete_preset,
-            load_preset
+            load_preset,
+            save_playback_state,
+            load_playback_state
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
