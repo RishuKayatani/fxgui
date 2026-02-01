@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
+use crate::logger;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Candle {
@@ -65,8 +66,10 @@ pub fn clear_cache(app: &AppHandle) -> Result<u64, String> {
 }
 
 pub fn load_csv_or_tsv(app: &AppHandle, path: &str) -> Result<IngestResult, String> {
+    let _ = logger::log_event(app, &format!("ingest start {}", path));
     let path = PathBuf::from(path);
     if !path.exists() {
+        let _ = logger::log_event(app, "ingest error file not found");
         return Err("file not found".to_string());
     }
 
@@ -75,6 +78,7 @@ pub fn load_csv_or_tsv(app: &AppHandle, path: &str) -> Result<IngestResult, Stri
 
     if cache_path.exists() {
         let dataset = load_from_cache(&cache_path)?;
+        let _ = logger::log_event(app, "ingest cache hit");
         return Ok(IngestResult {
             dataset,
             used_cache: true,
@@ -83,6 +87,7 @@ pub fn load_csv_or_tsv(app: &AppHandle, path: &str) -> Result<IngestResult, Stri
 
     let dataset = parse_csv_like(&path)?;
     save_to_cache(&cache_path, &dataset)?;
+    let _ = logger::log_event(app, "ingest success");
 
     Ok(IngestResult {
         dataset,
@@ -108,13 +113,13 @@ fn parse_csv_like(path: &Path) -> Result<DataSet, String> {
             return Err(format!("invalid column count at line {}", idx + 1));
         }
         let ts_raw = parts[0].trim();
-        let ts_utc = normalize_timestamp(ts_raw)?;
-        let open = parse_f64(parts[1])?;
-        let high = parse_f64(parts[2])?;
-        let low = parse_f64(parts[3])?;
-        let close = parse_f64(parts[4])?;
+        let ts_utc = normalize_timestamp(ts_raw).map_err(|e| format!("{} at line {}", e, idx + 1))?;
+        let open = parse_f64(parts[1]).map_err(|e| format!("{} at line {}", e, idx + 1))?;
+        let high = parse_f64(parts[2]).map_err(|e| format!("{} at line {}", e, idx + 1))?;
+        let low = parse_f64(parts[3]).map_err(|e| format!("{} at line {}", e, idx + 1))?;
+        let close = parse_f64(parts[4]).map_err(|e| format!("{} at line {}", e, idx + 1))?;
         let volume = if parts.len() >= 6 {
-            parse_f64(parts[5])?
+            parse_f64(parts[5]).map_err(|e| format!("{} at line {}", e, idx + 1))?
         } else {
             0.0
         };
