@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use rusqlite::OptionalExtension;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 use crate::logger;
@@ -472,50 +473,80 @@ pub fn save_indicator_cache(
 }
 
 fn parse_csv_like(path: &Path) -> Result<DataSet, String> {
-    let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let mut candles = Vec::new();
+    enum Mode {
+        Csv(u8),
+        Whitespace,
+    }
 
-    for (idx, line) in content.lines().enumerate() {
-        let line = line.trim();
+    let file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut reader = BufReader::new(file);
+    let mut first_line = String::new();
+    let mut header_present = false;
+    let mut mode = Mode::Whitespace;
+
+    loop {
+        first_line.clear();
+        let bytes = reader.read_line(&mut first_line).map_err(|e| e.to_string())?;
+        if bytes == 0 {
+            break;
+        }
+        let line = first_line.trim();
         if line.is_empty() {
             continue;
         }
-        // Allow comments or header-like lines
+        if line.contains('\t') {
+            mode = Mode::Csv(b'\t');
+        } else if line.contains(',') {
+            mode = Mode::Csv(b',');
+        } else {
+            mode = Mode::Whitespace;
+        }
         let lower = line.to_lowercase();
-        if idx == 0 && (lower.contains("timestamp") || (lower.contains("date") && lower.contains("time"))) {
-            continue;
+        if lower.contains("timestamp") || (lower.contains("date") && lower.contains("time")) {
+            header_present = true;
         }
-        let parts = split_line(line);
-        if parts.len() < 5 {
-            return Err(format!("invalid column count at line {}", idx + 1));
-        }
-        let (ts_raw, start_idx) = if parts.len() >= 6 && looks_like_date(parts[0]) && looks_like_time(parts[1]) {
-            (format!("{} {}", parts[0].trim(), parts[1].trim()), 2)
-        } else {
-            (parts[0].trim().to_string(), 1)
-        };
-        let ts_utc = normalize_timestamp(&ts_raw).map_err(|e| format!("{} at line {}", e, idx + 1))?;
-        if parts.len() < start_idx + 4 {
-            return Err(format!("invalid column count at line {}", idx + 1));
-        }
-        let open = parse_f64(parts[start_idx]).map_err(|e| format!("{} at line {}", e, idx + 1))?;
-        let high = parse_f64(parts[start_idx + 1]).map_err(|e| format!("{} at line {}", e, idx + 1))?;
-        let low = parse_f64(parts[start_idx + 2]).map_err(|e| format!("{} at line {}", e, idx + 1))?;
-        let close = parse_f64(parts[start_idx + 3]).map_err(|e| format!("{} at line {}", e, idx + 1))?;
-        let volume = if parts.len() > start_idx + 4 {
-            parse_f64(parts[start_idx + 4]).map_err(|e| format!("{} at line {}", e, idx + 1))?
-        } else {
-            0.0
-        };
+        break;
+    }
 
-        candles.push(Candle {
-            ts_utc,
-            open,
-            high,
-            low,
-            close,
-            volume,
-        });
+    let mut candles = Vec::new();
+    match mode {
+        Mode::Csv(delim) => {
+            let file = fs::File::open(path).map_err(|e| e.to_string())?;
+            let mut csv_reader = csv::ReaderBuilder::new()
+                .has_headers(false)
+                .flexible(true)
+                .delimiter(delim)
+                .from_reader(file);
+            for (idx, record) in csv_reader.records().enumerate() {
+                let record = record.map_err(|e| e.to_string())?;
+                if record.len() == 0 {
+                    continue;
+                }
+                if idx == 0 && header_present {
+                    continue;
+                }
+                let fields: Vec<&str> = record.iter().collect();
+                let candle = parse_parts(&fields, idx + 1)?;
+                candles.push(candle);
+            }
+        }
+        Mode::Whitespace => {
+            let file = fs::File::open(path).map_err(|e| e.to_string())?;
+            let reader = BufReader::new(file);
+            for (idx, line) in reader.lines().enumerate() {
+                let line = line.map_err(|e| e.to_string())?;
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+                if idx == 0 && header_present {
+                    continue;
+                }
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                let candle = parse_parts(&parts, idx + 1)?;
+                candles.push(candle);
+            }
+        }
     }
 
     Ok(DataSet {
@@ -524,14 +555,37 @@ fn parse_csv_like(path: &Path) -> Result<DataSet, String> {
     })
 }
 
-fn split_line(line: &str) -> Vec<&str> {
-    if line.contains('\t') {
-        line.split('\t').collect()
-    } else if line.contains(',') {
-        line.split(',').collect()
-    } else {
-        line.split_whitespace().collect()
+fn parse_parts(parts: &[&str], line_no: usize) -> Result<Candle, String> {
+    if parts.len() < 5 {
+        return Err(format!("invalid column count at line {}", line_no));
     }
+    let (ts_raw, start_idx) = if parts.len() >= 6 && looks_like_date(parts[0]) && looks_like_time(parts[1]) {
+        (format!("{} {}", parts[0].trim(), parts[1].trim()), 2)
+    } else {
+        (parts[0].trim().to_string(), 1)
+    };
+    let ts_utc = normalize_timestamp(&ts_raw).map_err(|e| format!("{} at line {}", e, line_no))?;
+    if parts.len() < start_idx + 4 {
+        return Err(format!("invalid column count at line {}", line_no));
+    }
+    let open = parse_f64(parts[start_idx]).map_err(|e| format!("{} at line {}", e, line_no))?;
+    let high = parse_f64(parts[start_idx + 1]).map_err(|e| format!("{} at line {}", e, line_no))?;
+    let low = parse_f64(parts[start_idx + 2]).map_err(|e| format!("{} at line {}", e, line_no))?;
+    let close = parse_f64(parts[start_idx + 3]).map_err(|e| format!("{} at line {}", e, line_no))?;
+    let volume = if parts.len() > start_idx + 4 {
+        parse_f64(parts[start_idx + 4]).map_err(|e| format!("{} at line {}", e, line_no))?
+    } else {
+        0.0
+    };
+
+    Ok(Candle {
+        ts_utc,
+        open,
+        high,
+        low,
+        close,
+        volume,
+    })
 }
 
 fn looks_like_date(s: &str) -> bool {
