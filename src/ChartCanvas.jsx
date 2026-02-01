@@ -28,7 +28,44 @@ const drawLineSeries = (ctx, series, { startX, startY, chartWidth, chartHeight, 
   ctx.stroke();
 };
 
-export default function ChartCanvas({ candles, viewBars, viewOffset, onViewChange, indicatorData, indicatorType }) {
+const drawLineChart = (ctx, data, { startX, startY, chartWidth, chartHeight, bars, min, max }) => {
+  const scale = chartHeight / (max - min);
+  ctx.strokeStyle = "#5ad1ff";
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  data.forEach((c, i) => {
+    const x = startX + (chartWidth / bars) * i + (chartWidth / bars) / 2;
+    const y = startY + (max - c.close) * scale;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+};
+
+const drawBarChart = (ctx, data, { startX, startY, chartWidth, chartHeight, bars, min, max }) => {
+  const scale = chartHeight / (max - min);
+  const barWidth = Math.max(1, chartWidth / bars * 0.6);
+  ctx.strokeStyle = "#ffd166";
+  data.forEach((c, i) => {
+    const x = startX + (chartWidth / bars) * i + (chartWidth / bars - barWidth) / 2;
+    const highY = startY + (max - c.high) * scale;
+    const lowY = startY + (max - c.low) * scale;
+    ctx.beginPath();
+    ctx.moveTo(x + barWidth / 2, highY);
+    ctx.lineTo(x + barWidth / 2, lowY);
+    ctx.stroke();
+  });
+};
+
+export default function ChartCanvas({
+  candles,
+  viewBars,
+  viewOffset,
+  onViewChange,
+  indicatorData,
+  indicatorType,
+  chartType,
+}) {
   const canvasRef = useRef(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [crosshair, setCrosshair] = useState(null);
@@ -90,28 +127,34 @@ export default function ChartCanvas({ candles, viewBars, viewOffset, onViewChang
     const chartWidth = width - 24;
     const startX = 12;
     const startY = 12;
-    const candleWidth = Math.max(2, chartWidth / bars * 0.6);
+    const drawType = chartType || "Candlestick";
+    if (drawType === "Line") {
+      drawLineChart(ctx, windowData, { startX, startY, chartWidth, chartHeight, bars, min, max });
+    } else if (drawType === "Bar") {
+      drawBarChart(ctx, windowData, { startX, startY, chartWidth, chartHeight, bars, min, max });
+    } else {
+      const candleWidth = Math.max(2, chartWidth / bars * 0.6);
+      windowData.forEach((c, i) => {
+        const x = startX + (chartWidth / bars) * i + (chartWidth / bars - candleWidth) / 2;
+        const scale = chartHeight / (max - min);
+        const openY = startY + (max - c.open) * scale;
+        const closeY = startY + (max - c.close) * scale;
+        const highY = startY + (max - c.high) * scale;
+        const lowY = startY + (max - c.low) * scale;
+        const color = c.close >= c.open ? "#5ad1ff" : "#ff6b6b";
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
 
-    windowData.forEach((c, i) => {
-      const x = startX + (chartWidth / bars) * i + (chartWidth / bars - candleWidth) / 2;
-      const scale = chartHeight / (max - min);
-      const openY = startY + (max - c.open) * scale;
-      const closeY = startY + (max - c.close) * scale;
-      const highY = startY + (max - c.high) * scale;
-      const lowY = startY + (max - c.low) * scale;
-      const color = c.close >= c.open ? "#5ad1ff" : "#ff6b6b";
-      ctx.strokeStyle = color;
-      ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(x + candleWidth / 2, highY);
+        ctx.lineTo(x + candleWidth / 2, lowY);
+        ctx.stroke();
 
-      ctx.beginPath();
-      ctx.moveTo(x + candleWidth / 2, highY);
-      ctx.lineTo(x + candleWidth / 2, lowY);
-      ctx.stroke();
-
-      const bodyTop = Math.min(openY, closeY);
-      const bodyHeight = Math.max(2, Math.abs(openY - closeY));
-      ctx.fillRect(x, bodyTop, candleWidth, bodyHeight);
-    });
+        const bodyTop = Math.min(openY, closeY);
+        const bodyHeight = Math.max(2, Math.abs(openY - closeY));
+        ctx.fillRect(x, bodyTop, candleWidth, bodyHeight);
+      });
+    }
 
     if (indicatorData) {
       const key = indicatorType ? indicatorType.toLowerCase() : "ma";
@@ -149,7 +192,7 @@ export default function ChartCanvas({ candles, viewBars, viewOffset, onViewChang
       ctx.lineTo(startX + chartWidth, crosshair.y);
       ctx.stroke();
     }
-  }, [candles, size, viewBars, viewOffset, crosshair, indicatorData, indicatorType]);
+  }, [candles, size, viewBars, viewOffset, crosshair, indicatorData, indicatorType, chartType]);
 
   const handleWheel = (event) => {
     event.preventDefault();
