@@ -63,6 +63,14 @@ body {
   font-size: 13px;
 }
 
+.split-toggle button:hover,
+.segmented button:hover,
+.ghost:hover,
+.list-item:hover,
+.preset-item button:hover {
+  border-color: rgba(90, 209, 255, 0.35);
+}
+
 .split-toggle button.active,
 .segmented button.active,
 .list-item.active,
@@ -116,6 +124,11 @@ body {
   margin-bottom: 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.list-item.active {
+  background: rgba(90, 209, 255, 0.08);
 }
 
 .chart-area {
@@ -143,6 +156,7 @@ body {
 
 .chart-pane.active {
   border-color: var(--accent-2);
+  box-shadow: 0 0 0 1px rgba(255, 190, 90, 0.35), 0 10px 24px rgba(0, 0, 0, 0.35);
 }
 
 .pane-header,
@@ -151,6 +165,16 @@ body {
   justify-content: space-between;
   font-size: 12px;
   color: var(--muted);
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid transparent;
+}
+
+.chart-pane.active .pane-header,
+.chart-pane.active .pane-footer {
+  border-color: rgba(255, 190, 90, 0.35);
+  color: #f2d2a2;
 }
 
 .seek-label {
@@ -168,6 +192,7 @@ body {
   color: #6b7686;
   position: relative;
   overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
 }
 
 .chart-canvas {
@@ -182,10 +207,17 @@ body {
   inset: 0;
   display: grid;
   place-items: center;
-  color: #6b7686;
+  color: #a2adbd;
   font-size: 12px;
   pointer-events: none;
-  background: rgba(13, 16, 22, 0.35);
+  background: rgba(13, 16, 22, 0.45);
+  text-align: center;
+  padding: 12px;
+}
+
+.chart-overlay div {
+  display: grid;
+  gap: 6px;
 }
 
 .setting-block {
@@ -230,6 +262,12 @@ input[type="range"] {
   padding: 8px;
 }
 
+.preset-row input:focus {
+  outline: none;
+  border-color: rgba(90, 209, 255, 0.6);
+  box-shadow: 0 0 0 2px rgba(90, 209, 255, 0.15);
+}
+
 .preset-list {
   display: grid;
   gap: 6px;
@@ -242,6 +280,7 @@ input[type="range"] {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 6px;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 @media (max-width: 1100px) {

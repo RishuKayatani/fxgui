@@ -213,7 +213,12 @@ function App() {
                   }}
                 />
                 {!candles || candles.length === 0 ? (
-                  <div className="chart-overlay">CSVを読み込むと表示されます</div>
+                  <div className="chart-overlay">
+                    <div>
+                      <div>CSVを読み込むと表示されます</div>
+                      <div>左の「CSV読み込み」から選択してください</div>
+                    </div>
+                  </div>
                 ) : null}
               </div>
               <div className="pane-footer">
