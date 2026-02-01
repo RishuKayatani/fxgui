@@ -324,6 +324,8 @@ function App() {
                   candles={pane.candles}
                   viewBars={pane.viewBars}
                   viewOffset={pane.viewOffset}
+                  indicatorData={pane.indicatorData}
+                  indicatorType={pane.indicator}
                   onViewChange={(next) => {
                     if (next.viewBars !== undefined) {
                       setPaneState((prev) =>

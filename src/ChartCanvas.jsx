@@ -2,7 +2,33 @@ import { useEffect, useRef, useState } from "react";
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
-export default function ChartCanvas({ candles, viewBars, viewOffset, onViewChange }) {
+const seriesValue = (value) => (value === null || value === undefined ? null : Number(value));
+
+const drawLineSeries = (ctx, series, { startX, startY, chartWidth, chartHeight, bars, min, max }, color) => {
+  const scale = chartHeight / (max - min);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  let started = false;
+  for (let i = 0; i < series.length; i += 1) {
+    const value = seriesValue(series[i]);
+    if (value === null || Number.isNaN(value)) {
+      started = false;
+      continue;
+    }
+    const x = startX + (chartWidth / bars) * i + (chartWidth / bars) / 2;
+    const y = startY + (max - value) * scale;
+    if (!started) {
+      ctx.moveTo(x, y);
+      started = true;
+    } else {
+      ctx.lineTo(x, y);
+    }
+  }
+  ctx.stroke();
+};
+
+export default function ChartCanvas({ candles, viewBars, viewOffset, onViewChange, indicatorData, indicatorType }) {
   const canvasRef = useRef(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [crosshair, setCrosshair] = useState(null);
@@ -86,6 +112,33 @@ export default function ChartCanvas({ candles, viewBars, viewOffset, onViewChang
       ctx.fillRect(x, bodyTop, candleWidth, bodyHeight);
     });
 
+    if (indicatorData) {
+      const key = indicatorType ? indicatorType.toLowerCase() : "ma";
+      const series = indicatorData[key] || indicatorData.ma;
+      if (Array.isArray(series)) {
+        const indicatorSlice = series.slice(offset, offset + bars);
+        let iMin = Infinity;
+        let iMax = -Infinity;
+        for (const v of indicatorSlice) {
+          const value = seriesValue(v);
+          if (value === null || Number.isNaN(value)) continue;
+          iMin = Math.min(iMin, value);
+          iMax = Math.max(iMax, value);
+        }
+        if (iMin !== Infinity && iMax !== -Infinity) {
+          const padding = (iMax - iMin) * 0.05 || 1;
+          iMin -= padding;
+          iMax += padding;
+          drawLineSeries(
+            ctx,
+            indicatorSlice,
+            { startX, startY, chartWidth, chartHeight, bars, min: iMin, max: iMax },
+            "#ffbe5a"
+          );
+        }
+      }
+    }
+
     if (crosshair) {
       ctx.strokeStyle = "rgba(255,255,255,0.2)";
       ctx.beginPath();
@@ -95,7 +148,7 @@ export default function ChartCanvas({ candles, viewBars, viewOffset, onViewChang
       ctx.lineTo(startX + chartWidth, crosshair.y);
       ctx.stroke();
     }
-  }, [candles, size, viewBars, viewOffset, crosshair]);
+  }, [candles, size, viewBars, viewOffset, crosshair, indicatorData, indicatorType]);
 
   const handleWheel = (event) => {
     event.preventDefault();
