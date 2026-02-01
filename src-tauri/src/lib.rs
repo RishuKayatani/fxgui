@@ -24,6 +24,11 @@ fn clear_cache(app: tauri::AppHandle) -> Result<u64, String> {
 }
 
 #[tauri::command]
+fn cache_status(app: tauri::AppHandle) -> Result<core::CacheStatus, String> {
+    core::cache_status(&app)
+}
+
+#[tauri::command]
 fn compute_indicators(dataset: core::DataSet) -> Result<serde_json::Value, String> {
     let closes = indicators::closes_from_candles(&dataset.candles);
     let ma = indicators::ma(&closes, 14);
@@ -82,6 +87,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ingest_csv,
             clear_cache,
+            cache_status,
             compute_indicators,
             resample_dataset,
             list_presets,

@@ -26,6 +26,13 @@ pub struct IngestResult {
     pub used_cache: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CacheStatus {
+    pub path: String,
+    pub files: u64,
+    pub bytes: u64,
+}
+
 fn cache_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let base = app
         .path()
@@ -63,6 +70,33 @@ pub fn clear_cache(app: &AppHandle) -> Result<u64, String> {
         }
     }
     Ok(removed)
+}
+
+pub fn cache_status(app: &AppHandle) -> Result<CacheStatus, String> {
+    let dir = cache_dir(app)?;
+    if !dir.exists() {
+        return Ok(CacheStatus {
+            path: dir.to_string_lossy().to_string(),
+            files: 0,
+            bytes: 0,
+        });
+    }
+    let mut files = 0;
+    let mut bytes = 0;
+    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) == Some("sqlite") {
+            files += 1;
+            let meta = fs::metadata(&path).map_err(|e| e.to_string())?;
+            bytes += meta.len();
+        }
+    }
+    Ok(CacheStatus {
+        path: dir.to_string_lossy().to_string(),
+        files,
+        bytes,
+    })
 }
 
 pub fn load_csv_or_tsv(app: &AppHandle, path: &str) -> Result<IngestResult, String> {

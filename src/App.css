@@ -355,3 +355,27 @@ input[type="range"] {
 .ingest-error-body {
   color: #ffb3b3;
 }
+
+.cache-panel {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.cache-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cache-meta {
+  font-size: 12px;
+  color: var(--muted);
+  display: grid;
+  gap: 4px;
+  word-break: break-all;
+}
