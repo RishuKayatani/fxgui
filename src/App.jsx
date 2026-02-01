@@ -143,7 +143,18 @@ function App() {
       preset: {
         name: presetName,
         split,
-        panes: paneState,
+        panes: paneState.map((pane) => ({
+          id: pane.id,
+          pair: pane.pair,
+          timeframe: pane.timeframe,
+          indicator: pane.indicator,
+          view_bars: pane.viewBars,
+          view_offset: pane.viewOffset,
+          playing: false,
+          speed: pane.speed,
+          seek: pane.seek,
+          bars: pane.bars,
+        })),
       },
     });
     await refreshPresets();
@@ -153,7 +164,20 @@ function App() {
   const loadPreset = async (name) => {
     const preset = await invoke("load_preset", { name });
     setSplit(preset.split);
-    setPaneState(preset.panes);
+    setPaneState(
+      preset.panes.map((pane, idx) => ({
+        ...emptyPane(idx),
+        id: pane.id ?? idx,
+        pair: pane.pair,
+        timeframe: pane.timeframe,
+        indicator: pane.indicator,
+        viewBars: pane.view_bars ?? 240,
+        viewOffset: pane.view_offset ?? 0,
+        speed: pane.speed,
+        seek: pane.seek,
+        bars: pane.bars,
+      }))
+    );
     setActivePane(0);
   };
 

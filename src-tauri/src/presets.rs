@@ -9,6 +9,8 @@ pub struct PaneState {
     pub pair: String,
     pub timeframe: String,
     pub indicator: String,
+    pub view_bars: i64,
+    pub view_offset: i64,
     pub playing: bool,
     pub speed: f64,
     pub seek: i64,
