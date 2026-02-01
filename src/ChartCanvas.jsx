@@ -70,7 +70,8 @@ export default function ChartCanvas({ candles, viewBars, viewOffset, onViewChang
       return;
     }
 
-    const bars = clamp(viewBars, 20, candles.length);
+    const minBars = Math.min(20, candles.length);
+    const bars = clamp(viewBars, minBars, candles.length);
     const maxOffset = Math.max(0, candles.length - bars);
     const offset = clamp(viewOffset, 0, maxOffset);
     const windowData = candles.slice(offset, offset + bars);
@@ -154,7 +155,8 @@ export default function ChartCanvas({ candles, viewBars, viewOffset, onViewChang
     event.preventDefault();
     const delta = Math.sign(event.deltaY);
     const maxBars = (candles && candles.length) || viewBars || 20;
-    const nextBars = clamp(viewBars + delta * 10, 20, maxBars);
+    const minBars = Math.min(20, maxBars);
+    const nextBars = clamp(viewBars + delta * 10, minBars, maxBars);
     onViewChange({ viewBars: nextBars });
   };
 

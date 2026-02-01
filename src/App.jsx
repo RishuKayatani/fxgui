@@ -80,6 +80,19 @@ function App() {
     );
   };
 
+  const applySeek = (nextSeek) => {
+    updateSeek(nextSeek);
+    setPaneState((prev) =>
+      prev.map((p, idx) => {
+        if (!syncEnabled && idx !== activePane) return p;
+        const maxOffset = Math.max(0, p.candles.length - p.viewBars);
+        const clampedSeek = clamp(nextSeek, 0, Math.max(0, p.candles.length - 1));
+        const nextOffset = clamp(clampedSeek - p.viewBars + 1, 0, maxOffset);
+        return { ...p, viewOffset: nextOffset, seek: clampedSeek };
+      })
+    );
+  };
+
   const syncViewToSeek = (seekValue, bars, pane) => {
     if (!pane.candles.length) return pane;
     const maxOffset = Math.max(0, pane.candles.length - bars);
@@ -416,14 +429,14 @@ function App() {
               max={Math.max(0, active.bars - 1)}
               value={active.seek}
               onChange={(e) =>
-                updateSeek(Number(e.target.value))
+                applySeek(Number(e.target.value))
               }
             />
             <div className="seek-actions">
-              <button type="button" className="ghost" onClick={() => updateSeek(active.seek - 1)}>
+              <button type="button" className="ghost" onClick={() => applySeek(active.seek - 1)}>
                 -1
               </button>
-              <button type="button" className="ghost" onClick={() => updateSeek(active.seek + 1)}>
+              <button type="button" className="ghost" onClick={() => applySeek(active.seek + 1)}>
                 +1
               </button>
             </div>
