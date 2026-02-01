@@ -14,6 +14,7 @@ const emptyPane = (idx) => ({
   pair: "USD/JPY",
   timeframe: "M1",
   indicator: "MA",
+  indicatorData: null,
   playing: false,
   speed: 1,
   seek: 0,
@@ -31,6 +32,7 @@ function App() {
   const [ingestInfo, setIngestInfo] = useState(null);
   const [ingestError, setIngestError] = useState("");
   const [ingestLoading, setIngestLoading] = useState(false);
+  const [rawDataset, setRawDataset] = useState(null);
   const [candles, setCandles] = useState([]);
   const [viewBars, setViewBars] = useState(240);
   const [viewOffset, setViewOffset] = useState(0);
@@ -132,14 +134,37 @@ function App() {
         rows: result.dataset.candles.length,
         usedCache: result.used_cache,
       });
+      setRawDataset(result.dataset);
       setCandles(result.dataset.candles);
       setViewBars(Math.min(240, result.dataset.candles.length || 240));
       setViewOffset(0);
       updatePane(activePane, { bars: result.dataset.candles.length, seek: 0 });
+      const indicators = await invoke("compute_indicators", { dataset: result.dataset });
+      updatePane(activePane, { indicatorData: indicators });
     } catch (err) {
       setIngestError(String(err));
     } finally {
       setIngestLoading(false);
+    }
+  };
+
+  const applyTimeframe = async (nextTf) => {
+    updatePane(activePane, { timeframe: nextTf });
+    const dataset = rawDataset || (candles.length ? { source_path: "", candles } : null);
+    if (!dataset) return;
+    try {
+      const resampled = await invoke("resample_dataset", {
+        dataset,
+        target: nextTf,
+      });
+      setCandles(resampled.candles);
+      setViewBars(Math.min(240, resampled.candles.length || 240));
+      setViewOffset(0);
+      updatePane(activePane, { bars: resampled.candles.length, seek: 0 });
+      const indicators = await invoke("compute_indicators", { dataset: resampled });
+      updatePane(activePane, { indicatorData: indicators });
+    } catch (err) {
+      setIngestError(String(err));
     }
   };
 
@@ -275,6 +300,7 @@ function App() {
               </div>
               <div className="pane-footer">
                 {pane.indicator}
+                {pane.indicatorData ? " · ready" : ""}
                 <span className="seek-label">
                   {pane.seek} / {pane.bars}
                 </span>
@@ -288,12 +314,12 @@ function App() {
           <div className="setting-block">
             <label>足の種類</label>
             <div className="segmented">
-              {["M1", "M5", "H1", "D1"].map((tf) => (
+              {["M1", "M5", "M15", "M30", "H1", "H4", "D1"].map((tf) => (
                 <button
                   key={tf}
                   type="button"
                   className={active.timeframe === tf ? "active" : ""}
-                  onClick={() => updatePane(activePane, { timeframe: tf })}
+                  onClick={() => applyTimeframe(tf)}
                 >
                   {tf}
                 </button>
