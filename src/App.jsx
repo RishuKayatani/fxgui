@@ -37,6 +37,7 @@ function App() {
   const [ingestError, setIngestError] = useState("");
   const [ingestLoading, setIngestLoading] = useState(false);
   const [syncEnabled, setSyncEnabled] = useState(false);
+  const [perfWarning, setPerfWarning] = useState("");
 
   const panes = useMemo(() => paneState.slice(0, split), [paneState, split]);
   const active = paneState[activePane];
@@ -188,6 +189,7 @@ function App() {
 
   const ingestCsv = async () => {
     setIngestError("");
+    setPerfWarning("");
     setIngestLoading(true);
     try {
       const file = await open({
@@ -215,6 +217,9 @@ function App() {
         seek: 0,
         indicatorData: indicators,
       });
+      if (result.dataset.candles.length >= 100000) {
+        setPerfWarning("大量データ（10万バー以上）です。動作が重くなる可能性があります。");
+      }
     } catch (err) {
       const message = String(err || "読み込みに失敗しました").replace(/^Error:\s*/i, "");
       setIngestError(message);
@@ -337,6 +342,7 @@ function App() {
               <div>cache: {ingestInfo.usedCache ? "hit (cached)" : "miss (parsed)"}</div>
             </div>
           ) : null}
+          {perfWarning ? <div className="perf-warning">{perfWarning}</div> : null}
           {ingestError ? (
             <div className="ingest-error">
               <div className="ingest-error-title">読み込みに失敗しました</div>
