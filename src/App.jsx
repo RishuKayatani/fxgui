@@ -59,6 +59,40 @@ function App() {
     );
   };
 
+  const updateRange = async (idx, nextOffset, nextBars) => {
+    const pane = paneState[idx];
+    if (!pane || !pane.rawDataset || !pane.rawDataset.source_path) {
+      return;
+    }
+    const sourcePath = pane.rawDataset.source_path;
+    const totalBars = pane.rawDataset.candles.length;
+    const bars = clamp(nextBars, 20, Math.max(20, totalBars));
+    const maxOffset = Math.max(0, totalBars - bars);
+    const offset = clamp(nextOffset, 0, maxOffset);
+    try {
+      const indicator = pane.indicator;
+      const range = await invoke("dataset_range", {
+        sourcePath,
+        offset,
+        limit: bars,
+      });
+      const indicators = await invoke("indicator_range", {
+        sourcePath,
+        offset,
+        limit: bars,
+        indicator,
+      });
+      updatePane(idx, {
+        candles: range.candles,
+        viewBars: bars,
+        viewOffset: offset,
+        indicatorData: indicators.series,
+      });
+    } catch (err) {
+      setIngestError(String(err));
+    }
+  };
+
   const toggleSync = () => {
     setSyncEnabled((prev) => {
       if (!prev) {
@@ -79,13 +113,14 @@ function App() {
     });
   };
 
-  const maxBars = active.candles.length || 0;
+  const maxBars = active.rawDataset?.candles.length || active.candles.length || 0;
 
   const updateSeek = (nextSeek) => {
     setPaneState((prev) =>
       prev.map((p, idx) => {
         if (!syncEnabled && idx !== activePane) return p;
-        const limit = Math.max(0, p.candles.length - 1);
+        const total = p.rawDataset?.candles.length ?? p.candles.length;
+        const limit = Math.max(0, total - 1);
         const clamped = clamp(nextSeek, 0, limit);
         return { ...p, seek: clamped };
       })
@@ -94,20 +129,27 @@ function App() {
 
   const applySeek = useCallback((nextSeek) => {
     updateSeek(nextSeek);
-    setPaneState((prev) =>
-      prev.map((p, idx) => {
+    setPaneState((prev) => {
+      const next = prev.map((p, idx) => {
         if (!syncEnabled && idx !== activePane) return p;
-        const maxOffset = Math.max(0, p.candles.length - p.viewBars);
-        const clampedSeek = clamp(nextSeek, 0, Math.max(0, p.candles.length - 1));
+        const total = p.rawDataset?.candles.length ?? p.candles.length;
+        const maxOffset = Math.max(0, total - p.viewBars);
+        const clampedSeek = clamp(nextSeek, 0, Math.max(0, total - 1));
         const nextOffset = clamp(clampedSeek - p.viewBars + 1, 0, maxOffset);
         return { ...p, viewOffset: nextOffset, seek: clampedSeek };
-      })
-    );
+      });
+      next.forEach((p, idx) => {
+        if (!syncEnabled && idx !== activePane) return;
+        updateRange(idx, p.viewOffset, p.viewBars);
+      });
+      return next;
+    });
   }, [activePane, syncEnabled]);
 
   const syncViewToSeek = (seekValue, bars, pane) => {
-    if (!pane.candles.length) return pane;
-    const maxOffset = Math.max(0, pane.candles.length - bars);
+    const total = pane.rawDataset?.candles.length ?? pane.candles.length;
+    if (!total) return pane;
+    const maxOffset = Math.max(0, total - bars);
     const nextOffset = clamp(seekValue - bars + 1, 0, maxOffset);
     return { ...pane, viewOffset: nextOffset };
   };
@@ -125,7 +167,8 @@ function App() {
           if (idx === activePane && nextSeek === active.seek) {
             return { ...p, playing: false };
           }
-          const limit = Math.max(0, p.candles.length - 1);
+          const total = p.rawDataset?.candles.length ?? p.candles.length;
+          const limit = Math.max(0, total - 1);
           return { ...p, seek: clamp(nextSeek, 0, limit) };
         });
       });
@@ -142,6 +185,8 @@ function App() {
         return syncViewToSeek(active.seek, p.viewBars, p);
       })
     );
+    const nextOffset = syncViewToSeek(active.seek, active.viewBars, active).viewOffset;
+    updateRange(activePane, nextOffset, active.viewBars);
   }, [active.seek, activePane, maxBars, syncEnabled]);
 
   useEffect(() => {
@@ -340,22 +385,35 @@ function App() {
         rows: result.dataset.candles.length,
         usedCache: result.used_cache,
       });
-      const nextBars = Math.min(240, result.dataset.candles.length || 240);
+      const totalBars = result.dataset.candles.length;
+      const nextBars = Math.min(240, totalBars || 240);
       const t4 = perfStart();
-      const indicators = await invoke("compute_indicators", { dataset: result.dataset });
+      await invoke("compute_indicators", { dataset: result.dataset });
       perfLog("ipc.compute_indicators", t4);
       const t5 = perfStart();
-      updatePane(activePane, {
-        rawDataset: result.dataset,
-        candles: result.dataset.candles,
-        viewBars: nextBars,
-        viewOffset: 0,
-        bars: result.dataset.candles.length,
-        seek: 0,
-        indicatorData: indicators,
+      const initRange = await invoke("dataset_range", {
+        sourcePath: result.dataset.source_path,
+        offset: 0,
+        limit: nextBars,
       });
+      const initIndicators = await invoke("indicator_range", {
+        sourcePath: result.dataset.source_path,
+        offset: 0,
+        limit: nextBars,
+        indicator: active.indicator,
+      });
+        updatePane(activePane, {
+          rawDataset: result.dataset,
+          candles: initRange.candles,
+          viewBars: nextBars,
+          viewOffset: 0,
+          bars: totalBars,
+          seek: 0,
+          indicatorData: initIndicators.series,
+        });
+        updateRange(activePane, 0, nextBars);
       perfLog("state.updatePane", t5);
-      if (result.dataset.candles.length >= 100000) {
+      if (totalBars >= 100000) {
         setPerfWarning("大量データ（10万バー以上）です。動作が重くなる可能性があります。");
       }
       perfLog("ingest.total", t0);
@@ -371,9 +429,7 @@ function App() {
 
   const applyTimeframe = async (nextTf) => {
     updatePane(activePane, { timeframe: nextTf });
-    const dataset =
-      active.rawDataset ||
-      (active.candles.length ? { source_path: "", candles: active.candles } : null);
+    const dataset = active.rawDataset || null;
     if (!dataset) return;
     try {
       const t0 = perfStart();
@@ -383,18 +439,33 @@ function App() {
       });
       perfLog("ipc.resample_dataset", t0);
       const t1 = perfStart();
-      const indicators = await invoke("compute_indicators", { dataset: resampled });
+      await invoke("compute_indicators", { dataset: resampled });
       perfLog("ipc.compute_indicators", t1);
       const t2 = perfStart();
-      const nextBars = Math.min(240, resampled.candles.length || 240);
+      const totalBars = resampled.candles.length;
+      const nextBars = Math.min(240, totalBars || 240);
+      const initRange = await invoke("dataset_range", {
+        sourcePath: resampled.source_path,
+        offset: 0,
+        limit: nextBars,
+      });
+      const initIndicators = await invoke("indicator_range", {
+        sourcePath: resampled.source_path,
+        offset: 0,
+        limit: nextBars,
+        indicator: active.indicator,
+      });
       updatePane(activePane, {
-        candles: resampled.candles,
+        rawDataset: resampled,
+        candles: initRange.candles,
         viewBars: nextBars,
         viewOffset: 0,
-        bars: resampled.candles.length,
+        bars: totalBars,
         seek: 0,
-        indicatorData: indicators,
+        indicatorData: initIndicators.series,
       });
+      // ensure range fetch aligns with new dataset
+      updateRange(activePane, 0, nextBars);
       perfLog("state.applyTimeframe", t2);
     } catch (err) {
       setIngestError(String(err));
@@ -567,6 +638,7 @@ function App() {
                   candles={pane.candles}
                   viewBars={pane.viewBars}
                   viewOffset={pane.viewOffset}
+                  totalBars={pane.rawDataset?.candles.length || pane.candles.length}
                   indicatorData={pane.indicatorData}
                   indicatorType={pane.indicator}
                   chartType={pane.chartType}
@@ -575,28 +647,35 @@ function App() {
                       setPaneState((prev) =>
                         prev.map((p, pIdx) => {
                           if (!syncEnabled && pIdx !== idx) return p;
-                          const limit = Math.max(20, p.candles.length || 20);
+                          const total = p.rawDataset?.candles.length ?? p.candles.length;
+                          const limit = Math.max(20, total || 20);
                           const clampedBars = clamp(next.viewBars, 20, limit);
-                          const maxOffset = Math.max(0, p.candles.length - clampedBars);
+                          const maxOffset = Math.max(0, total - clampedBars);
                           const nextOffset = clamp(p.viewOffset, 0, maxOffset);
                           return { ...p, viewBars: clampedBars, viewOffset: nextOffset };
                         })
                       );
+                      const offset = next.viewOffset ?? pane.viewOffset;
+                      const bars = next.viewBars ?? pane.viewBars;
+                      updateRange(idx, offset, bars);
                     }
                     if (next.viewOffset !== undefined) {
                       setPaneState((prev) =>
                         prev.map((p, pIdx) => {
                           if (!syncEnabled && pIdx !== idx) return p;
-                          const maxOffset = Math.max(0, p.candles.length - p.viewBars);
+                          const total = p.rawDataset?.candles.length ?? p.candles.length;
+                          const maxOffset = Math.max(0, total - p.viewBars);
                           const nextOffset = clamp(next.viewOffset, 0, maxOffset);
                           const nextSeek = clamp(
                             nextOffset + p.viewBars - 1,
                             0,
-                            Math.max(0, p.candles.length - 1)
+                            Math.max(0, total - 1)
                           );
                           return { ...p, viewOffset: nextOffset, seek: nextSeek };
                         })
                       );
+                      const offset = next.viewOffset ?? pane.viewOffset;
+                      updateRange(idx, offset, pane.viewBars);
                     }
                   }}
                 />
@@ -645,7 +724,10 @@ function App() {
                   key={ind}
                   type="button"
                   className={active.indicator === ind ? "active" : ""}
-                  onClick={() => updatePane(activePane, { indicator: ind })}
+                  onClick={() => {
+                    updatePane(activePane, { indicator: ind });
+                    updateRange(activePane, active.viewOffset, active.viewBars);
+                  }}
                 >
                   {ind}
                 </button>

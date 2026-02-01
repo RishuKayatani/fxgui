@@ -65,6 +65,7 @@ export default function ChartCanvas({
   indicatorData,
   indicatorType,
   chartType,
+  totalBars,
 }) {
   const canvasRef = useRef(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -108,11 +109,12 @@ export default function ChartCanvas({
       return;
     }
 
-    const minBars = Math.min(20, candles.length);
-    const bars = clamp(viewBars, minBars, candles.length);
-    const maxOffset = Math.max(0, candles.length - bars);
+    const total = Math.max(1, totalBars || candles.length);
+    const minBars = Math.min(20, total);
+    const bars = clamp(viewBars, minBars, total);
+    const maxOffset = Math.max(0, total - bars);
     const offset = clamp(viewOffset, 0, maxOffset);
-    const windowData = candles.slice(offset, offset + bars);
+    const windowData = candles;
 
     let min = Infinity;
     let max = -Infinity;
@@ -159,9 +161,11 @@ export default function ChartCanvas({
 
     if (indicatorData) {
       const key = indicatorType ? indicatorType.toLowerCase() : "ma";
-      const series = indicatorData[key] || indicatorData.ma;
+      const series = Array.isArray(indicatorData)
+        ? indicatorData
+        : indicatorData[key] || indicatorData.ma;
       if (Array.isArray(series)) {
-        const indicatorSlice = series.slice(offset, offset + bars);
+        const indicatorSlice = Array.isArray(indicatorData) ? series : series.slice(offset, offset + bars);
         let iMin = Infinity;
         let iMax = -Infinity;
         for (const v of indicatorSlice) {
@@ -202,7 +206,7 @@ export default function ChartCanvas({
   const handleWheel = (event) => {
     event.preventDefault();
     const delta = Math.sign(event.deltaY);
-    const maxBars = (candles && candles.length) || viewBars || 20;
+    const maxBars = totalBars || (candles && candles.length) || viewBars || 20;
     const minBars = Math.min(20, maxBars);
     const nextBars = clamp(viewBars + delta * 10, minBars, maxBars);
     onViewChange({ viewBars: nextBars });
@@ -219,10 +223,10 @@ export default function ChartCanvas({
       y: clamp(event.clientY - rect.top, 0, rect.height),
     });
 
-    if (dragStart && candles && candles.length > 0) {
+    if (dragStart && (totalBars || (candles && candles.length > 0))) {
       const dx = event.clientX - dragStart.x;
       const shift = Math.round(dx / 6);
-      const maxOffset = Math.max(0, candles.length - viewBars);
+      const maxOffset = Math.max(0, (totalBars || candles.length) - viewBars);
       const nextOffset = clamp(dragStart.offset - shift, 0, maxOffset);
       onViewChange({ viewOffset: nextOffset });
     }
