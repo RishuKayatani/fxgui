@@ -38,6 +38,61 @@ fn record_dataset_history(app: tauri::AppHandle, path: &str) -> Result<(), Strin
     core::record_dataset_history(&app, path)
 }
 
+#[derive(serde::Serialize)]
+struct RangeResult {
+    candles: Vec<core::Candle>,
+}
+
+#[derive(serde::Serialize)]
+struct IndicatorRangeResult {
+    series: Vec<Option<f64>>,
+}
+
+#[tauri::command]
+fn dataset_range(
+    app: tauri::AppHandle,
+    source_path: String,
+    offset: usize,
+    limit: usize,
+) -> Result<RangeResult, String> {
+    let data = core::load_csv_or_tsv(&app, &source_path)?;
+    let total = data.dataset.candles.len();
+    let start = offset.min(total);
+    let end = (start + limit).min(total);
+    let slice = data.dataset.candles[start..end].to_vec();
+    Ok(RangeResult { candles: slice })
+}
+
+#[tauri::command]
+fn indicator_range(
+    app: tauri::AppHandle,
+    source_path: String,
+    offset: usize,
+    limit: usize,
+    indicator: String,
+) -> Result<IndicatorRangeResult, String> {
+    let data = core::load_csv_or_tsv(&app, &source_path)?;
+    let full = compute_indicators(app.clone(), data.dataset)?;
+    let key = indicator.to_lowercase();
+    let series = full
+        .get(&key)
+        .or_else(|| full.get("ma"))
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "indicator not found".to_string())?;
+    let total = series.len();
+    let start = offset.min(total);
+    let end = (start + limit).min(total);
+    let mut out = Vec::with_capacity(end - start);
+    for value in &series[start..end] {
+        if value.is_null() {
+            out.push(None);
+        } else {
+            out.push(value.as_f64());
+        }
+    }
+    Ok(IndicatorRangeResult { series: out })
+}
+
 #[tauri::command]
 fn compute_indicators(
     app: tauri::AppHandle,
@@ -174,6 +229,8 @@ pub fn run() {
             cache_status,
             list_dataset_history,
             record_dataset_history,
+            dataset_range,
+            indicator_range,
             compute_indicators,
             resample_dataset,
             list_presets,
