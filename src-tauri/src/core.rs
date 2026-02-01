@@ -99,6 +99,52 @@ pub fn cache_status(app: &AppHandle) -> Result<CacheStatus, String> {
     })
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DatasetHistory {
+    pub path: String,
+    pub last_used: i64,
+}
+
+fn history_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    Ok(base.join("dataset_history.json"))
+}
+
+pub fn list_dataset_history(app: &AppHandle) -> Result<Vec<DatasetHistory>, String> {
+    let path = history_path(app)?;
+    if !path.exists() {
+        return Ok(vec![]);
+    }
+    let data = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let history: Vec<DatasetHistory> = serde_json::from_str(&data).map_err(|e| e.to_string())?;
+    Ok(history)
+}
+
+pub fn record_dataset_history(app: &AppHandle, path: &str) -> Result<(), String> {
+    let mut history = list_dataset_history(app)?;
+    history.retain(|item| item.path != path);
+    history.insert(
+        0,
+        DatasetHistory {
+            path: path.to_string(),
+            last_used: chrono::Utc::now().timestamp(),
+        },
+    );
+    if history.len() > 10 {
+        history.truncate(10);
+    }
+    let path = history_path(app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let data = serde_json::to_string_pretty(&history).map_err(|e| e.to_string())?;
+    fs::write(&path, data).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub fn load_csv_or_tsv(app: &AppHandle, path: &str) -> Result<IngestResult, String> {
     let _ = logger::log_event(app, &format!("ingest start {}", path));
     let path = PathBuf::from(path);
