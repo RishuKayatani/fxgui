@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use rusqlite::OptionalExtension;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
@@ -200,6 +201,274 @@ pub fn load_csv_or_tsv(app: &AppHandle, path: &str) -> Result<IngestResult, Stri
         dataset,
         used_cache: false,
     })
+}
+
+fn cache_path_for_source(app: &AppHandle, source_path: &str) -> Result<Option<PathBuf>, String> {
+    if source_path.trim().is_empty() {
+        return Ok(None);
+    }
+    let path = PathBuf::from(source_path);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let key = cache_key(&path)?;
+    Ok(Some(cache_path(app, &key)?))
+}
+
+pub fn load_resample_cache(
+    app: &AppHandle,
+    source_path: &str,
+    target: &str,
+) -> Result<Option<DataSet>, String> {
+    let cache_path = match cache_path_for_source(app, source_path)? {
+        Some(path) => path,
+        None => return Ok(None),
+    };
+    if !cache_path.exists() {
+        return Ok(None);
+    }
+    let conn = rusqlite::Connection::open(cache_path).map_err(|e| e.to_string())?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS resample_meta (target TEXT PRIMARY KEY, count INTEGER);\n\
+         CREATE TABLE IF NOT EXISTS resample_candles (\n\
+           target TEXT,\n\
+           idx INTEGER,\n\
+           ts_utc TEXT,\n\
+           open REAL,\n\
+           high REAL,\n\
+           low REAL,\n\
+           close REAL,\n\
+           volume REAL\n\
+         );\n\
+         CREATE INDEX IF NOT EXISTS idx_resample_target_idx ON resample_candles(target, idx);",
+    )
+    .map_err(|e| e.to_string())?;
+
+    let count: Option<i64> = conn
+        .query_row(
+            "SELECT count FROM resample_meta WHERE target = ?1",
+            [target],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let count = match count {
+        Some(v) if v > 0 => v as usize,
+        _ => return Ok(None),
+    };
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT ts_utc, open, high, low, close, volume\n\
+             FROM resample_candles WHERE target = ?1 ORDER BY idx ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([target], |row| {
+            Ok(Candle {
+                ts_utc: row.get(0)?,
+                open: row.get(1)?,
+                high: row.get(2)?,
+                low: row.get(3)?,
+                close: row.get(4)?,
+                volume: row.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut candles = Vec::with_capacity(count);
+    for row in rows {
+        candles.push(row.map_err(|e| e.to_string())?);
+    }
+    if candles.len() != count {
+        return Ok(None);
+    }
+
+    Ok(Some(DataSet {
+        source_path: source_path.to_string(),
+        candles,
+    }))
+}
+
+pub fn save_resample_cache(
+    app: &AppHandle,
+    source_path: &str,
+    target: &str,
+    dataset: &DataSet,
+) -> Result<(), String> {
+    let cache_path = match cache_path_for_source(app, source_path)? {
+        Some(path) => path,
+        None => return Ok(()),
+    };
+    if let Some(parent) = cache_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let mut conn = rusqlite::Connection::open(cache_path).map_err(|e| e.to_string())?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS resample_meta (target TEXT PRIMARY KEY, count INTEGER);\n\
+         CREATE TABLE IF NOT EXISTS resample_candles (\n\
+           target TEXT,\n\
+           idx INTEGER,\n\
+           ts_utc TEXT,\n\
+           open REAL,\n\
+           high REAL,\n\
+           low REAL,\n\
+           close REAL,\n\
+           volume REAL\n\
+         );\n\
+         CREATE INDEX IF NOT EXISTS idx_resample_target_idx ON resample_candles(target, idx);",
+    )
+    .map_err(|e| e.to_string())?;
+
+    conn.execute("DELETE FROM resample_candles WHERE target = ?1", [target])
+        .map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM resample_meta WHERE target = ?1", [target])
+        .map_err(|e| e.to_string())?;
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    {
+        let mut stmt = tx
+            .prepare(
+                "INSERT INTO resample_candles (target, idx, ts_utc, open, high, low, close, volume)\n\
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            )
+            .map_err(|e| e.to_string())?;
+        for (idx, c) in dataset.candles.iter().enumerate() {
+            stmt.execute((
+                target,
+                idx as i64,
+                &c.ts_utc,
+                c.open,
+                c.high,
+                c.low,
+                c.close,
+                c.volume,
+            ))
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    tx.execute(
+        "INSERT INTO resample_meta (target, count) VALUES (?1, ?2)",
+        (target, dataset.candles.len() as i64),
+    )
+    .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn load_indicator_cache(
+    app: &AppHandle,
+    source_path: &str,
+    expected_len: usize,
+    indicators: &[&str],
+) -> Result<Option<serde_json::Value>, String> {
+    let cache_path = match cache_path_for_source(app, source_path)? {
+        Some(path) => path,
+        None => return Ok(None),
+    };
+    if !cache_path.exists() {
+        return Ok(None);
+    }
+    let conn = rusqlite::Connection::open(cache_path).map_err(|e| e.to_string())?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS indicator_meta (indicator TEXT PRIMARY KEY, count INTEGER);\n\
+         CREATE TABLE IF NOT EXISTS indicator_values (\n\
+           indicator TEXT,\n\
+           idx INTEGER,\n\
+           value REAL\n\
+         );\n\
+         CREATE INDEX IF NOT EXISTS idx_indicator_idx ON indicator_values(indicator, idx);",
+    )
+    .map_err(|e| e.to_string())?;
+
+    let mut result = serde_json::Map::new();
+    for name in indicators {
+        let count: Option<i64> = conn
+            .query_row(
+                "SELECT count FROM indicator_meta WHERE indicator = ?1",
+                [*name],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let count = match count {
+            Some(v) if v as usize == expected_len => v as usize,
+            _ => return Ok(None),
+        };
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT idx, value FROM indicator_values WHERE indicator = ?1 ORDER BY idx ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([*name], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<f64>>(1)?)))
+            .map_err(|e| e.to_string())?;
+
+        let mut series = vec![serde_json::Value::Null; count];
+        for row in rows {
+            let (idx, value) = row.map_err(|e| e.to_string())?;
+            let idx = idx as usize;
+            if idx < series.len() {
+                series[idx] = match value {
+                    Some(v) => serde_json::Value::from(v),
+                    None => serde_json::Value::Null,
+                };
+            }
+        }
+        result.insert((*name).to_string(), serde_json::Value::Array(series));
+    }
+
+    Ok(Some(serde_json::Value::Object(result)))
+}
+
+pub fn save_indicator_cache(
+    app: &AppHandle,
+    source_path: &str,
+    indicators: &[(&str, Vec<Option<f64>>)],
+) -> Result<(), String> {
+    let cache_path = match cache_path_for_source(app, source_path)? {
+        Some(path) => path,
+        None => return Ok(()),
+    };
+    if let Some(parent) = cache_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let mut conn = rusqlite::Connection::open(cache_path).map_err(|e| e.to_string())?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS indicator_meta (indicator TEXT PRIMARY KEY, count INTEGER);\n\
+         CREATE TABLE IF NOT EXISTS indicator_values (\n\
+           indicator TEXT,\n\
+           idx INTEGER,\n\
+           value REAL\n\
+         );\n\
+         CREATE INDEX IF NOT EXISTS idx_indicator_idx ON indicator_values(indicator, idx);",
+    )
+    .map_err(|e| e.to_string())?;
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    for (name, series) in indicators {
+        tx.execute("DELETE FROM indicator_values WHERE indicator = ?1", [*name])
+            .map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM indicator_meta WHERE indicator = ?1", [*name])
+            .map_err(|e| e.to_string())?;
+        let mut stmt = tx
+            .prepare(
+                "INSERT INTO indicator_values (indicator, idx, value) VALUES (?1, ?2, ?3)",
+            )
+            .map_err(|e| e.to_string())?;
+        for (idx, value) in series.iter().enumerate() {
+            stmt.execute((*name, idx as i64, value))
+                .map_err(|e| e.to_string())?;
+        }
+        tx.execute(
+            "INSERT INTO indicator_meta (indicator, count) VALUES (?1, ?2)",
+            (*name, series.len() as i64),
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 fn parse_csv_like(path: &Path) -> Result<DataSet, String> {
