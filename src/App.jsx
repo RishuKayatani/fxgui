@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/api/dialog";
 import { invoke } from "@tauri-apps/api/core";
 import ChartCanvas from "./ChartCanvas";
@@ -6,6 +6,8 @@ import "./App.css";
 
 const splitOptions = [1, 2, 4];
 const speedOptions = [0.5, 1, 2, 5, 10];
+const basePlaybackMs = 500;
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 const emptyPane = (idx) => ({
   id: idx,
@@ -41,6 +43,46 @@ function App() {
       prev.map((p, i) => (i === idx ? { ...p, ...patch } : p))
     );
   };
+
+  const maxBars = candles.length || 0;
+
+  const updateSeek = (nextSeek) => {
+    const clamped = clamp(nextSeek, 0, Math.max(0, maxBars - 1));
+    updatePane(activePane, { seek: clamped });
+  };
+
+  const syncViewToSeek = (seekValue, bars = viewBars) => {
+    if (!maxBars) return;
+    const maxOffset = Math.max(0, maxBars - bars);
+    const nextOffset = clamp(seekValue - bars + 1, 0, maxOffset);
+    setViewOffset(nextOffset);
+  };
+
+  useEffect(() => {
+    if (!active.playing) return undefined;
+    if (!maxBars) return undefined;
+
+    const interval = Math.max(50, basePlaybackMs / active.speed);
+    const id = window.setInterval(() => {
+      setPaneState((prev) =>
+        prev.map((p, idx) => {
+          if (idx !== activePane) return p;
+          const next = Math.min(p.seek + 1, Math.max(0, maxBars - 1));
+          if (next === p.seek) {
+            return { ...p, playing: false };
+          }
+          return { ...p, seek: next };
+        })
+      );
+    }, interval);
+
+    return () => window.clearInterval(id);
+  }, [active.playing, active.speed, activePane, maxBars]);
+
+  useEffect(() => {
+    if (!maxBars) return;
+    syncViewToSeek(active.seek, viewBars);
+  }, [active.seek, viewBars, maxBars]);
 
   const refreshPresets = async () => {
     const list = await invoke("list_presets");
@@ -209,7 +251,17 @@ function App() {
                   viewOffset={viewOffset}
                   onViewChange={(next) => {
                     if (next.viewBars !== undefined) setViewBars(next.viewBars);
-                    if (next.viewOffset !== undefined) setViewOffset(next.viewOffset);
+                    if (next.viewOffset !== undefined) {
+                      setViewOffset(next.viewOffset);
+                      if (candles.length > 0) {
+                        const nextSeek = clamp(
+                          next.viewOffset + viewBars - 1,
+                          0,
+                          Math.max(0, candles.length - 1)
+                        );
+                        updatePane(activePane, { seek: nextSeek });
+                      }
+                    }
                   }}
                 />
                 {!candles || candles.length === 0 ? (
@@ -268,12 +320,20 @@ function App() {
             <input
               type="range"
               min="0"
-              max={active.bars}
+              max={Math.max(0, active.bars - 1)}
               value={active.seek}
               onChange={(e) =>
-                updatePane(activePane, { seek: Number(e.target.value) })
+                updateSeek(Number(e.target.value))
               }
             />
+            <div className="seek-actions">
+              <button type="button" className="ghost" onClick={() => updateSeek(active.seek - 1)}>
+                -1
+              </button>
+              <button type="button" className="ghost" onClick={() => updateSeek(active.seek + 1)}>
+                +1
+              </button>
+            </div>
             <div className="seek-meta">{active.seek} / {active.bars} bars</div>
           </div>
           <div className="setting-block">

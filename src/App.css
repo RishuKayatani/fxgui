@@ -247,6 +247,12 @@ input[type="range"] {
   color: var(--muted);
 }
 
+.seek-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
 .preset-row {
   display: grid;
   grid-template-columns: 1fr auto auto;
