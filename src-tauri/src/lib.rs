@@ -6,6 +6,7 @@ mod indicators;
 mod indicators_tests;
 mod resample;
 mod presets;
+mod logger;
 
 #[allow(dead_code)]
 fn _infer_interval_unused() {
