@@ -15,6 +15,10 @@ const emptyPane = (idx) => ({
   timeframe: "M1",
   indicator: "MA",
   indicatorData: null,
+  rawDataset: null,
+  candles: [],
+  viewBars: 240,
+  viewOffset: 0,
   playing: false,
   speed: 1,
   seek: 0,
@@ -32,10 +36,7 @@ function App() {
   const [ingestInfo, setIngestInfo] = useState(null);
   const [ingestError, setIngestError] = useState("");
   const [ingestLoading, setIngestLoading] = useState(false);
-  const [rawDataset, setRawDataset] = useState(null);
-  const [candles, setCandles] = useState([]);
-  const [viewBars, setViewBars] = useState(240);
-  const [viewOffset, setViewOffset] = useState(0);
+  const [syncEnabled, setSyncEnabled] = useState(false);
 
   const panes = useMemo(() => paneState.slice(0, split), [paneState, split]);
   const active = paneState[activePane];
@@ -46,18 +47,44 @@ function App() {
     );
   };
 
-  const maxBars = candles.length || 0;
-
-  const updateSeek = (nextSeek) => {
-    const clamped = clamp(nextSeek, 0, Math.max(0, maxBars - 1));
-    updatePane(activePane, { seek: clamped });
+  const toggleSync = () => {
+    setSyncEnabled((prev) => {
+      if (!prev) {
+        const anchor = paneState[activePane];
+        setPaneState((current) =>
+          current.map((p, idx) => {
+            if (idx === activePane) return p;
+            return {
+              ...p,
+              viewBars: anchor.viewBars,
+              viewOffset: anchor.viewOffset,
+              seek: anchor.seek,
+            };
+          })
+        );
+      }
+      return !prev;
+    });
   };
 
-  const syncViewToSeek = (seekValue, bars = viewBars) => {
-    if (!maxBars) return;
-    const maxOffset = Math.max(0, maxBars - bars);
+  const maxBars = active.candles.length || 0;
+
+  const updateSeek = (nextSeek) => {
+    setPaneState((prev) =>
+      prev.map((p, idx) => {
+        if (!syncEnabled && idx !== activePane) return p;
+        const limit = Math.max(0, p.candles.length - 1);
+        const clamped = clamp(nextSeek, 0, limit);
+        return { ...p, seek: clamped };
+      })
+    );
+  };
+
+  const syncViewToSeek = (seekValue, bars, pane) => {
+    if (!pane.candles.length) return pane;
+    const maxOffset = Math.max(0, pane.candles.length - bars);
     const nextOffset = clamp(seekValue - bars + 1, 0, maxOffset);
-    setViewOffset(nextOffset);
+    return { ...pane, viewOffset: nextOffset };
   };
 
   useEffect(() => {
@@ -66,25 +93,31 @@ function App() {
 
     const interval = Math.max(50, basePlaybackMs / active.speed);
     const id = window.setInterval(() => {
-      setPaneState((prev) =>
-        prev.map((p, idx) => {
-          if (idx !== activePane) return p;
-          const next = Math.min(p.seek + 1, Math.max(0, maxBars - 1));
-          if (next === p.seek) {
+      setPaneState((prev) => {
+        const nextSeek = Math.min(active.seek + 1, Math.max(0, maxBars - 1));
+        return prev.map((p, idx) => {
+          if (!syncEnabled && idx !== activePane) return p;
+          if (idx === activePane && nextSeek === active.seek) {
             return { ...p, playing: false };
           }
-          return { ...p, seek: next };
-        })
-      );
+          const limit = Math.max(0, p.candles.length - 1);
+          return { ...p, seek: clamp(nextSeek, 0, limit) };
+        });
+      });
     }, interval);
 
     return () => window.clearInterval(id);
-  }, [active.playing, active.speed, activePane, maxBars]);
+  }, [active.playing, active.speed, active.seek, activePane, maxBars, syncEnabled]);
 
   useEffect(() => {
     if (!maxBars) return;
-    syncViewToSeek(active.seek, viewBars);
-  }, [active.seek, viewBars, maxBars]);
+    setPaneState((prev) =>
+      prev.map((p, idx) => {
+        if (!syncEnabled && idx !== activePane) return p;
+        return syncViewToSeek(active.seek, p.viewBars, p);
+      })
+    );
+  }, [active.seek, activePane, maxBars, syncEnabled]);
 
   const refreshPresets = async () => {
     const list = await invoke("list_presets");
@@ -134,13 +167,17 @@ function App() {
         rows: result.dataset.candles.length,
         usedCache: result.used_cache,
       });
-      setRawDataset(result.dataset);
-      setCandles(result.dataset.candles);
-      setViewBars(Math.min(240, result.dataset.candles.length || 240));
-      setViewOffset(0);
-      updatePane(activePane, { bars: result.dataset.candles.length, seek: 0 });
+      const nextBars = Math.min(240, result.dataset.candles.length || 240);
       const indicators = await invoke("compute_indicators", { dataset: result.dataset });
-      updatePane(activePane, { indicatorData: indicators });
+      updatePane(activePane, {
+        rawDataset: result.dataset,
+        candles: result.dataset.candles,
+        viewBars: nextBars,
+        viewOffset: 0,
+        bars: result.dataset.candles.length,
+        seek: 0,
+        indicatorData: indicators,
+      });
     } catch (err) {
       setIngestError(String(err));
     } finally {
@@ -150,19 +187,25 @@ function App() {
 
   const applyTimeframe = async (nextTf) => {
     updatePane(activePane, { timeframe: nextTf });
-    const dataset = rawDataset || (candles.length ? { source_path: "", candles } : null);
+    const dataset =
+      active.rawDataset ||
+      (active.candles.length ? { source_path: "", candles: active.candles } : null);
     if (!dataset) return;
     try {
       const resampled = await invoke("resample_dataset", {
         dataset,
         target: nextTf,
       });
-      setCandles(resampled.candles);
-      setViewBars(Math.min(240, resampled.candles.length || 240));
-      setViewOffset(0);
-      updatePane(activePane, { bars: resampled.candles.length, seek: 0 });
       const indicators = await invoke("compute_indicators", { dataset: resampled });
-      updatePane(activePane, { indicatorData: indicators });
+      const nextBars = Math.min(240, resampled.candles.length || 240);
+      updatePane(activePane, {
+        candles: resampled.candles,
+        viewBars: nextBars,
+        viewOffset: 0,
+        bars: resampled.candles.length,
+        seek: 0,
+        indicatorData: indicators,
+      });
     } catch (err) {
       setIngestError(String(err));
     }
@@ -196,6 +239,13 @@ function App() {
             onClick={() => updatePane(activePane, { playing: !active.playing })}
           >
             {active.playing ? "一時停止" : "再生"}
+          </button>
+          <button
+            type="button"
+            className={syncEnabled ? "ghost active" : "ghost"}
+            onClick={toggleSync}
+          >
+            同期 {syncEnabled ? "ON" : "OFF"}
           </button>
           <div className="speed-group">
             {speedOptions.map((value) => (
@@ -271,25 +321,40 @@ function App() {
               </div>
               <div className="pane-body">
                 <ChartCanvas
-                  candles={candles}
-                  viewBars={viewBars}
-                  viewOffset={viewOffset}
+                  candles={pane.candles}
+                  viewBars={pane.viewBars}
+                  viewOffset={pane.viewOffset}
                   onViewChange={(next) => {
-                    if (next.viewBars !== undefined) setViewBars(next.viewBars);
+                    if (next.viewBars !== undefined) {
+                      setPaneState((prev) =>
+                        prev.map((p, pIdx) => {
+                          if (!syncEnabled && pIdx !== idx) return p;
+                          const limit = Math.max(20, p.candles.length || 20);
+                          const clampedBars = clamp(next.viewBars, 20, limit);
+                          const maxOffset = Math.max(0, p.candles.length - clampedBars);
+                          const nextOffset = clamp(p.viewOffset, 0, maxOffset);
+                          return { ...p, viewBars: clampedBars, viewOffset: nextOffset };
+                        })
+                      );
+                    }
                     if (next.viewOffset !== undefined) {
-                      setViewOffset(next.viewOffset);
-                      if (candles.length > 0) {
-                        const nextSeek = clamp(
-                          next.viewOffset + viewBars - 1,
-                          0,
-                          Math.max(0, candles.length - 1)
-                        );
-                        updatePane(activePane, { seek: nextSeek });
-                      }
+                      setPaneState((prev) =>
+                        prev.map((p, pIdx) => {
+                          if (!syncEnabled && pIdx !== idx) return p;
+                          const maxOffset = Math.max(0, p.candles.length - p.viewBars);
+                          const nextOffset = clamp(next.viewOffset, 0, maxOffset);
+                          const nextSeek = clamp(
+                            nextOffset + p.viewBars - 1,
+                            0,
+                            Math.max(0, p.candles.length - 1)
+                          );
+                          return { ...p, viewOffset: nextOffset, seek: nextSeek };
+                        })
+                      );
                     }
                   }}
                 />
-                {!candles || candles.length === 0 ? (
+                {!pane.candles || pane.candles.length === 0 ? (
                   <div className="chart-overlay">
                     <div>
                       <div>CSVを読み込むと表示されます</div>
