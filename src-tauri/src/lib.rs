@@ -48,6 +48,44 @@ struct IndicatorRangeResult {
     series: Vec<Option<f64>>,
 }
 
+#[derive(serde::Serialize)]
+struct QuickIngestResult {
+    source_path: String,
+    total: usize,
+    used_cache: bool,
+    initial: Vec<core::Candle>,
+}
+
+#[tauri::command]
+fn ingest_csv_quick(
+    app: tauri::AppHandle,
+    path: String,
+    initial_limit: usize,
+) -> Result<QuickIngestResult, String> {
+    let total = match core::cached_bar_count(&app, &path) {
+        Ok(Some(count)) => Some(count),
+        _ => None,
+    };
+    if let Some(count) = total {
+        let initial = core::load_range_from_cache(&app, &path, 0, initial_limit)?
+            .unwrap_or_default();
+        return Ok(QuickIngestResult {
+            source_path: path,
+            total: count,
+            used_cache: true,
+            initial,
+        });
+    }
+
+    let initial = core::load_range_from_path(&path, 0, initial_limit)?;
+    Ok(QuickIngestResult {
+        source_path: path,
+        total: initial.len(),
+        used_cache: false,
+        initial,
+    })
+}
+
 #[tauri::command]
 fn dataset_range(
     app: tauri::AppHandle,
@@ -55,12 +93,11 @@ fn dataset_range(
     offset: usize,
     limit: usize,
 ) -> Result<RangeResult, String> {
-    let data = core::load_csv_or_tsv(&app, &source_path)?;
-    let total = data.dataset.candles.len();
-    let start = offset.min(total);
-    let end = (start + limit).min(total);
-    let slice = data.dataset.candles[start..end].to_vec();
-    Ok(RangeResult { candles: slice })
+    if let Ok(Some(candles)) = core::load_range_from_cache(&app, &source_path, offset, limit) {
+        return Ok(RangeResult { candles });
+    }
+    let candles = core::load_range_from_path(&source_path, offset, limit)?;
+    Ok(RangeResult { candles })
 }
 
 #[tauri::command]
@@ -225,6 +262,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             ingest_csv,
+            ingest_csv_quick,
             clear_cache,
             cache_status,
             list_dataset_history,

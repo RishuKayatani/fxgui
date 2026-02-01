@@ -204,6 +204,60 @@ pub fn load_csv_or_tsv(app: &AppHandle, path: &str) -> Result<IngestResult, Stri
     })
 }
 
+pub fn cached_bar_count(app: &AppHandle, source_path: &str) -> Result<Option<usize>, String> {
+    let cache_path = match cache_path_for_source(app, source_path)? {
+        Some(path) => path,
+        None => return Ok(None),
+    };
+    if !cache_path.exists() {
+        return Ok(None);
+    }
+    let conn = rusqlite::Connection::open(cache_path).map_err(|e| e.to_string())?;
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM candles", [], |row| row.get(0))
+        .map_err(|e| e.to_string())?;
+    Ok(Some(count as usize))
+}
+
+pub fn load_range_from_cache(
+    app: &AppHandle,
+    source_path: &str,
+    offset: usize,
+    limit: usize,
+) -> Result<Option<Vec<Candle>>, String> {
+    let cache_path = match cache_path_for_source(app, source_path)? {
+        Some(path) => path,
+        None => return Ok(None),
+    };
+    if !cache_path.exists() {
+        return Ok(None);
+    }
+    let conn = rusqlite::Connection::open(cache_path).map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT ts_utc, open, high, low, close, volume\n\
+             FROM candles ORDER BY ROWID ASC LIMIT ?1 OFFSET ?2",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map((limit as i64, offset as i64), |row| {
+            Ok(Candle {
+                ts_utc: row.get(0)?,
+                open: row.get(1)?,
+                high: row.get(2)?,
+                low: row.get(3)?,
+                close: row.get(4)?,
+                volume: row.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut candles = Vec::new();
+    for row in rows {
+        candles.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(Some(candles))
+}
+
 fn cache_path_for_source(app: &AppHandle, source_path: &str) -> Result<Option<PathBuf>, String> {
     if source_path.trim().is_empty() {
         return Ok(None);
@@ -473,44 +527,10 @@ pub fn save_indicator_cache(
 }
 
 fn parse_csv_like(path: &Path) -> Result<DataSet, String> {
-    enum Mode {
-        Csv(u8),
-        Whitespace,
-    }
-
-    let file = fs::File::open(path).map_err(|e| e.to_string())?;
-    let mut reader = BufReader::new(file);
-    let mut first_line = String::new();
-    let mut header_present = false;
-    let mut mode = Mode::Whitespace;
-
-    loop {
-        first_line.clear();
-        let bytes = reader.read_line(&mut first_line).map_err(|e| e.to_string())?;
-        if bytes == 0 {
-            break;
-        }
-        let line = first_line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        if line.contains('\t') {
-            mode = Mode::Csv(b'\t');
-        } else if line.contains(',') {
-            mode = Mode::Csv(b',');
-        } else {
-            mode = Mode::Whitespace;
-        }
-        let lower = line.to_lowercase();
-        if lower.contains("timestamp") || (lower.contains("date") && lower.contains("time")) {
-            header_present = true;
-        }
-        break;
-    }
-
+    let (mode, header_present) = detect_mode_and_header(path)?;
     let mut candles = Vec::new();
     match mode {
-        Mode::Csv(delim) => {
+        ParseMode::Csv(delim) => {
             let file = fs::File::open(path).map_err(|e| e.to_string())?;
             let mut csv_reader = csv::ReaderBuilder::new()
                 .has_headers(false)
@@ -530,7 +550,7 @@ fn parse_csv_like(path: &Path) -> Result<DataSet, String> {
                 candles.push(candle);
             }
         }
-        Mode::Whitespace => {
+        ParseMode::Whitespace => {
             let file = fs::File::open(path).map_err(|e| e.to_string())?;
             let reader = BufReader::new(file);
             for (idx, line) in reader.lines().enumerate() {
@@ -553,6 +573,107 @@ fn parse_csv_like(path: &Path) -> Result<DataSet, String> {
         source_path: path.to_string_lossy().to_string(),
         candles,
     })
+}
+
+enum ParseMode {
+    Csv(u8),
+    Whitespace,
+}
+
+fn detect_mode_and_header(path: &Path) -> Result<(ParseMode, bool), String> {
+    let file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let reader = BufReader::new(file);
+    for line in reader.lines() {
+        let line = line.map_err(|e| e.to_string())?;
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let mode = if line.contains('\t') {
+            ParseMode::Csv(b'\t')
+        } else if line.contains(',') {
+            ParseMode::Csv(b',')
+        } else {
+            ParseMode::Whitespace
+        };
+        let lower = line.to_lowercase();
+        let header = lower.contains("timestamp") || (lower.contains("date") && lower.contains("time"));
+        return Ok((mode, header));
+    }
+    Ok((ParseMode::Whitespace, false))
+}
+
+fn parse_csv_window(path: &Path, offset: usize, limit: usize) -> Result<Vec<Candle>, String> {
+    let (mode, header_present) = detect_mode_and_header(path)?;
+    let mut candles = Vec::new();
+    match mode {
+        ParseMode::Csv(delim) => {
+            let file = fs::File::open(path).map_err(|e| e.to_string())?;
+            let mut csv_reader = csv::ReaderBuilder::new()
+                .has_headers(false)
+                .flexible(true)
+                .delimiter(delim)
+                .from_reader(file);
+            let mut seen = 0usize;
+            for (idx, record) in csv_reader.records().enumerate() {
+                let record = record.map_err(|e| e.to_string())?;
+                if record.len() == 0 {
+                    continue;
+                }
+                if idx == 0 && header_present {
+                    continue;
+                }
+                if seen < offset {
+                    seen += 1;
+                    continue;
+                }
+                if candles.len() >= limit {
+                    break;
+                }
+                let fields: Vec<&str> = record.iter().collect();
+                candles.push(parse_parts(&fields, idx + 1)?);
+                seen += 1;
+            }
+        }
+        ParseMode::Whitespace => {
+            let file = fs::File::open(path).map_err(|e| e.to_string())?;
+            let reader = BufReader::new(file);
+            let mut seen = 0usize;
+            for (idx, line) in reader.lines().enumerate() {
+                let line = line.map_err(|e| e.to_string())?;
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+                if idx == 0 && header_present {
+                    continue;
+                }
+                if seen < offset {
+                    seen += 1;
+                    continue;
+                }
+                if candles.len() >= limit {
+                    break;
+                }
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                candles.push(parse_parts(&parts, idx + 1)?);
+                seen += 1;
+            }
+        }
+    }
+    Ok(candles)
+}
+
+pub fn load_range_from_path(
+    source_path: &str,
+    offset: usize,
+    limit: usize,
+) -> Result<Vec<Candle>, String> {
+    let path = PathBuf::from(source_path);
+    if !path.exists() {
+        return Err("file not found".to_string());
+    }
+    parse_csv_window(&path, offset, limit)
 }
 
 fn parse_parts(parts: &[&str], line_no: usize) -> Result<Candle, String> {
