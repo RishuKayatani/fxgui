@@ -198,7 +198,7 @@ fn parse_csv_like(path: &Path) -> Result<DataSet, String> {
         } else {
             (parts[0].trim().to_string(), 1)
         };
-        let ts_utc = normalize_timestamp(ts_raw).map_err(|e| format!("{} at line {}", e, idx + 1))?;
+        let ts_utc = normalize_timestamp(&ts_raw).map_err(|e| format!("{} at line {}", e, idx + 1))?;
         if parts.len() < start_idx + 4 {
             return Err(format!("invalid column count at line {}", idx + 1));
         }
