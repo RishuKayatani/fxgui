@@ -467,7 +467,7 @@ function App() {
             >
               <div className="pane-header">
                 <span>{pane.pair}</span>
-                <span>{pane.timeframe}</span>
+                <span>{pane.timeframe} UTC</span>
               </div>
               <div className="pane-body">
                 <ChartCanvas
