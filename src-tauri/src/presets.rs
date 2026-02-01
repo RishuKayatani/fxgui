@@ -24,6 +24,41 @@ pub struct Preset {
     pub panes: Vec<PaneState>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PlaybackState {
+    pub seek: i64,
+    pub speed: f64,
+    pub playing: bool,
+}
+
+fn playback_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let base = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    Ok(base.join("playback_state.json"))
+}
+
+pub fn save_playback(app: &AppHandle, state: PlaybackState) -> Result<(), String> {
+    let path = playback_path(app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let data = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
+    fs::write(&path, data).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub fn load_playback(app: &AppHandle) -> Result<Option<PlaybackState>, String> {
+    let path = playback_path(app)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+    let data = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let state: PlaybackState = serde_json::from_str(&data).map_err(|e| e.to_string())?;
+    Ok(Some(state))
+}
+
 fn presets_path(app: &AppHandle) -> Result<PathBuf, String> {
     let base = app
         .path()
