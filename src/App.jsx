@@ -13,6 +13,7 @@ const emptyPane = (idx) => ({
   id: idx,
   pair: "USD/JPY",
   timeframe: "M1",
+  chartType: "Candlestick",
   indicator: "MA",
   indicatorData: null,
   rawDataset: null,
@@ -475,6 +476,7 @@ function App() {
                   viewOffset={pane.viewOffset}
                   indicatorData={pane.indicatorData}
                   indicatorType={pane.indicator}
+                  chartType={pane.chartType}
                   onViewChange={(next) => {
                     if (next.viewBars !== undefined) {
                       setPaneState((prev) =>
@@ -553,6 +555,21 @@ function App() {
                   onClick={() => updatePane(activePane, { indicator: ind })}
                 >
                   {ind}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="setting-block">
+            <label>チャート種別</label>
+            <div className="segmented">
+              {["Candlestick", "Line", "Bar"].map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={active.chartType === mode ? "active" : ""}
+                  onClick={() => updatePane(activePane, { chartType: mode })}
+                >
+                  {mode}
                 </button>
               ))}
             </div>
