@@ -3,6 +3,9 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 pub fn log_event(app: &AppHandle, message: &str) -> Result<(), String> {
+    if !cfg!(debug_assertions) {
+        return Ok(());
+    }
     let path = log_path(app)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;

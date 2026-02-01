@@ -146,6 +146,7 @@ pub fn record_dataset_history(app: &AppHandle, path: &str) -> Result<(), String>
 }
 
 pub fn load_csv_or_tsv(app: &AppHandle, path: &str) -> Result<IngestResult, String> {
+    let start = std::time::Instant::now();
     let _ = logger::log_event(app, &format!("ingest start {}", path));
     let path = PathBuf::from(path);
     if !path.exists() {
@@ -157,17 +158,43 @@ pub fn load_csv_or_tsv(app: &AppHandle, path: &str) -> Result<IngestResult, Stri
     let cache_path = cache_path(app, &key)?;
 
     if cache_path.exists() {
+        let cache_start = std::time::Instant::now();
         let dataset = load_from_cache(&cache_path)?;
+        let _ = logger::log_event(
+            app,
+            &format!("ingest cache load {}ms", cache_start.elapsed().as_millis()),
+        );
         let _ = logger::log_event(app, "ingest cache hit");
+        let _ = logger::log_event(
+            app,
+            &format!("ingest total {}ms", start.elapsed().as_millis()),
+        );
         return Ok(IngestResult {
             dataset,
             used_cache: true,
         });
     }
 
+    let parse_start = std::time::Instant::now();
     let dataset = parse_csv_like(&path)?;
+    let _ = logger::log_event(
+        app,
+        &format!("ingest parse {}ms", parse_start.elapsed().as_millis()),
+    );
+    let cache_write_start = std::time::Instant::now();
     save_to_cache(&cache_path, &dataset)?;
+    let _ = logger::log_event(
+        app,
+        &format!(
+            "ingest cache write {}ms",
+            cache_write_start.elapsed().as_millis()
+        ),
+    );
     let _ = logger::log_event(app, "ingest success");
+    let _ = logger::log_event(
+        app,
+        &format!("ingest total {}ms", start.elapsed().as_millis()),
+    );
 
     Ok(IngestResult {
         dataset,
