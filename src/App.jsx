@@ -216,7 +216,8 @@ function App() {
         indicatorData: indicators,
       });
     } catch (err) {
-      setIngestError(String(err));
+      const message = String(err || "読み込みに失敗しました").replace(/^Error:\s*/i, "");
+      setIngestError(message);
     } finally {
       setIngestLoading(false);
     }
@@ -336,7 +337,15 @@ function App() {
               <div>cache: {ingestInfo.usedCache ? "hit (cached)" : "miss (parsed)"}</div>
             </div>
           ) : null}
-          {ingestError ? <div className="ingest-error">{ingestError}</div> : null}
+          {ingestError ? (
+            <div className="ingest-error">
+              <div className="ingest-error-title">読み込みに失敗しました</div>
+              <div className="ingest-error-body">{ingestError}</div>
+              <button type="button" className="ghost" onClick={ingestCsv}>
+                再読み込み
+              </button>
+            </div>
+          ) : null}
         </aside>
 
         <main
