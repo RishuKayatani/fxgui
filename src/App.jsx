@@ -1,26 +1,32 @@
 import { useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 
 const splitOptions = [1, 2, 4];
 const speedOptions = [0.5, 1, 2, 5, 10];
 
+const emptyPane = (idx) => ({
+  id: idx,
+  pair: "USD/JPY",
+  timeframe: "M1",
+  indicator: "MA",
+  playing: false,
+  speed: 1,
+  seek: 0,
+  bars: 240,
+});
+
 function App() {
   const [split, setSplit] = useState(2);
   const [activePane, setActivePane] = useState(0);
   const [paneState, setPaneState] = useState(() =>
-    Array.from({ length: 4 }, (_, idx) => ({
-      id: idx,
-      pair: "USD/JPY",
-      timeframe: "M1",
-      indicator: "MA",
-      playing: false,
-      speed: 1,
-      seek: 0,
-      bars: 240,
-    }))
+    Array.from({ length: 4 }, (_, idx) => emptyPane(idx))
   );
+  const [presets, setPresets] = useState([]);
+  const [presetName, setPresetName] = useState("");
 
   const panes = useMemo(() => paneState.slice(0, split), [paneState, split]);
+  const active = paneState[activePane];
 
   const updatePane = (idx, patch) => {
     setPaneState((prev) =>
@@ -28,7 +34,35 @@ function App() {
     );
   };
 
-  const active = paneState[activePane];
+  const refreshPresets = async () => {
+    const list = await invoke("list_presets");
+    setPresets(list);
+  };
+
+  const savePreset = async () => {
+    if (!presetName.trim()) return;
+    await invoke("save_preset", {
+      preset: {
+        name: presetName,
+        split,
+        panes: paneState,
+      },
+    });
+    await refreshPresets();
+    setPresetName("");
+  };
+
+  const loadPreset = async (name) => {
+    const preset = await invoke("load_preset", { name });
+    setSplit(preset.split);
+    setPaneState(preset.panes);
+    setActivePane(0);
+  };
+
+  const deletePreset = async (name) => {
+    await invoke("delete_preset", { name });
+    await refreshPresets();
+  };
 
   return (
     <div className="app-shell">
@@ -113,7 +147,9 @@ function App() {
               </div>
               <div className="pane-footer">
                 {pane.indicator}
-                <span className="seek-label">{pane.seek} / {pane.bars}</span>
+                <span className="seek-label">
+                  {pane.seek} / {pane.bars}
+                </span>
               </div>
             </section>
           ))}
@@ -172,6 +208,39 @@ function App() {
               }
             />
             <div className="seek-meta">{active.seek} / {active.bars} bars</div>
+          </div>
+          <div className="setting-block">
+            <label>プリセット</label>
+            <div className="preset-row">
+              <input
+                type="text"
+                value={presetName}
+                placeholder="preset name"
+                onChange={(e) => setPresetName(e.target.value)}
+              />
+              <button type="button" className="ghost" onClick={savePreset}>
+                保存
+              </button>
+              <button type="button" className="ghost" onClick={refreshPresets}>
+                更新
+              </button>
+            </div>
+            <div className="preset-list">
+              {presets.map((p) => (
+                <div key={p.name} className="preset-item">
+                  <button type="button" onClick={() => loadPreset(p.name)}>
+                    {p.name}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    onClick={() => deletePreset(p.name)}
+                  >
+                    削除
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         </aside>
       </div>

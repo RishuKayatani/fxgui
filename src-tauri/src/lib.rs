@@ -5,6 +5,7 @@ mod core_tests;
 mod indicators;
 mod indicators_tests;
 mod resample;
+mod presets;
 
 #[allow(dead_code)]
 fn _infer_interval_unused() {
@@ -53,6 +54,26 @@ fn resample_dataset(dataset: core::DataSet, target: String) -> Result<core::Data
     resample::resample(&dataset, interval)
 }
 
+#[tauri::command]
+fn list_presets(app: tauri::AppHandle) -> Result<Vec<presets::Preset>, String> {
+    presets::list_presets(&app)
+}
+
+#[tauri::command]
+fn save_preset(app: tauri::AppHandle, preset: presets::Preset) -> Result<(), String> {
+    presets::save_preset(&app, preset)
+}
+
+#[tauri::command]
+fn delete_preset(app: tauri::AppHandle, name: &str) -> Result<bool, String> {
+    presets::delete_preset(&app, name)
+}
+
+#[tauri::command]
+fn load_preset(app: tauri::AppHandle, name: &str) -> Result<presets::Preset, String> {
+    presets::load_preset(&app, name)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -61,7 +82,11 @@ pub fn run() {
             ingest_csv,
             clear_cache,
             compute_indicators,
-            resample_dataset
+            resample_dataset,
+            list_presets,
+            save_preset,
+            delete_preset,
+            load_preset
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
