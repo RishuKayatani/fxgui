@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/api/dialog";
 import { invoke } from "@tauri-apps/api/core";
 import ChartCanvas from "./ChartCanvas";
@@ -83,7 +83,7 @@ function App() {
     );
   };
 
-  const applySeek = (nextSeek) => {
+  const applySeek = useCallback((nextSeek) => {
     updateSeek(nextSeek);
     setPaneState((prev) =>
       prev.map((p, idx) => {
@@ -94,7 +94,7 @@ function App() {
         return { ...p, viewOffset: nextOffset, seek: clampedSeek };
       })
     );
-  };
+  }, [activePane, syncEnabled]);
 
   const syncViewToSeek = (seekValue, bars, pane) => {
     if (!pane.candles.length) return pane;
@@ -134,6 +134,38 @@ function App() {
       })
     );
   }, [active.seek, activePane, maxBars, syncEnabled]);
+
+  useEffect(() => {
+    const handler = (event) => {
+      if (event.target && ["INPUT", "TEXTAREA"].includes(event.target.tagName)) {
+        return;
+      }
+      if (event.code === "Space") {
+        event.preventDefault();
+        updatePane(activePane, { playing: !active.playing });
+      }
+      if (event.key === "1") {
+        setSplit(1);
+        setActivePane(0);
+      }
+      if (event.key === "2") {
+        setSplit(2);
+        setActivePane(0);
+      }
+      if (event.key === "4") {
+        setSplit(4);
+        setActivePane(0);
+      }
+      if (event.key === "ArrowLeft") {
+        applySeek(active.seek - 1);
+      }
+      if (event.key === "ArrowRight") {
+        applySeek(active.seek + 1);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [active.playing, active.seek, activePane, applySeek]);
 
   const refreshPresets = async () => {
     const list = await invoke("list_presets");
