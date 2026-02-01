@@ -38,6 +38,7 @@ function App() {
   const [ingestLoading, setIngestLoading] = useState(false);
   const [syncEnabled, setSyncEnabled] = useState(false);
   const [perfWarning, setPerfWarning] = useState("");
+  const [cacheInfo, setCacheInfo] = useState(null);
 
   const panes = useMemo(() => paneState.slice(0, split), [paneState, split]);
   const active = paneState[activePane];
@@ -138,6 +139,16 @@ function App() {
     setPresets(list);
   };
 
+  const refreshCacheInfo = async () => {
+    const info = await invoke("cache_status");
+    setCacheInfo(info);
+  };
+
+  const clearCacheUi = async () => {
+    await invoke("clear_cache");
+    await refreshCacheInfo();
+  };
+
   const savePreset = async () => {
     if (!presetName.trim()) return;
     await invoke("save_preset", {
@@ -220,6 +231,7 @@ function App() {
       if (result.dataset.candles.length >= 100000) {
         setPerfWarning("大量データ（10万バー以上）です。動作が重くなる可能性があります。");
       }
+      await refreshCacheInfo();
     } catch (err) {
       const message = String(err || "読み込みに失敗しました").replace(/^Error:\s*/i, "");
       setIngestError(message);
@@ -352,6 +364,26 @@ function App() {
               </button>
             </div>
           ) : null}
+          <div className="cache-panel">
+            <div className="panel-title">Cache</div>
+            <div className="cache-row">
+              <button type="button" className="ghost" onClick={refreshCacheInfo}>
+                情報更新
+              </button>
+              <button type="button" className="ghost" onClick={clearCacheUi}>
+                キャッシュ削除
+              </button>
+            </div>
+            {cacheInfo ? (
+              <div className="cache-meta">
+                <div>path: {cacheInfo.path}</div>
+                <div>files: {cacheInfo.files}</div>
+                <div>size: {Math.round(cacheInfo.bytes / 1024)} KB</div>
+              </div>
+            ) : (
+              <div className="cache-meta">未取得</div>
+            )}
+          </div>
         </aside>
 
         <main
