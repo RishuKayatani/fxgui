@@ -268,17 +268,53 @@ function App() {
     await refreshPresets();
   };
 
+  const normalizeDialogPath = (value) => {
+    if (Array.isArray(value)) {
+      return value[0] ?? null;
+    }
+    if (typeof value === "string") {
+      return value;
+    }
+    if (value && typeof value === "object") {
+      if (typeof value.path === "string") {
+        return value.path;
+      }
+      if (Array.isArray(value.paths) && typeof value.paths[0] === "string") {
+        return value.paths[0];
+      }
+    }
+    return null;
+  };
+
+  const safeStringify = (value) => {
+    const seen = new WeakSet();
+    try {
+      return JSON.stringify(value, (key, val) => {
+        if (typeof val === "object" && val !== null) {
+          if (seen.has(val)) return "[circular]";
+          seen.add(val);
+        }
+        return val;
+      });
+    } catch (err) {
+      return String(err);
+    }
+  };
+
   const ingestCsv = async (overridePath) => {
     setIngestError("");
     setPerfWarning("");
     setIngestLoading(true);
     try {
-      const file = overridePath
+      const override = typeof overridePath === "string" ? overridePath : null;
+      const dialogResult = override
         || await open({
           multiple: false,
           filters: [{ name: "CSV/TSV", extensions: ["csv", "tsv"] }],
         });
+      const file = normalizeDialogPath(dialogResult);
       if (!file) {
+        setIngestError("ファイルパスを取得できませんでした。");
         setIngestLoading(false);
         return;
       }
@@ -416,7 +452,7 @@ function App() {
           <button
             type="button"
             className="ghost"
-            onClick={ingestCsv}
+            onClick={() => ingestCsv()}
             disabled={ingestLoading}
           >
             {ingestLoading ? "読み込み中..." : "CSV読み込み"}
@@ -432,7 +468,7 @@ function App() {
             <div className="ingest-error">
               <div className="ingest-error-title">読み込みに失敗しました</div>
               <div className="ingest-error-body">{ingestError}</div>
-              <button type="button" className="ghost" onClick={ingestCsv}>
+              <button type="button" className="ghost" onClick={() => ingestCsv()}>
                 再読み込み
               </button>
             </div>
