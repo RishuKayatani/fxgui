@@ -379,3 +379,8 @@ input[type="range"] {
   gap: 4px;
   word-break: break-all;
 }
+
+.history-list {
+  display: grid;
+  gap: 6px;
+}

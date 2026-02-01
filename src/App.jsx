@@ -39,6 +39,7 @@ function App() {
   const [syncEnabled, setSyncEnabled] = useState(false);
   const [perfWarning, setPerfWarning] = useState("");
   const [cacheInfo, setCacheInfo] = useState(null);
+  const [datasetHistory, setDatasetHistory] = useState([]);
 
   const panes = useMemo(() => paneState.slice(0, split), [paneState, split]);
   const active = paneState[activePane];
@@ -144,6 +145,11 @@ function App() {
     setCacheInfo(info);
   };
 
+  const refreshDatasetHistory = async () => {
+    const history = await invoke("list_dataset_history");
+    setDatasetHistory(history);
+  };
+
   const clearCacheUi = async () => {
     await invoke("clear_cache");
     await refreshCacheInfo();
@@ -198,20 +204,22 @@ function App() {
     await refreshPresets();
   };
 
-  const ingestCsv = async () => {
+  const ingestCsv = async (overridePath) => {
     setIngestError("");
     setPerfWarning("");
     setIngestLoading(true);
     try {
-      const file = await open({
-        multiple: false,
-        filters: [{ name: "CSV/TSV", extensions: ["csv", "tsv"] }],
-      });
+      const file = overridePath
+        || await open({
+          multiple: false,
+          filters: [{ name: "CSV/TSV", extensions: ["csv", "tsv"] }],
+        });
       if (!file) {
         setIngestLoading(false);
         return;
       }
       const result = await invoke("ingest_csv", { path: file });
+      await invoke("record_dataset_history", { path: file });
       setIngestInfo({
         path: result.dataset.source_path,
         rows: result.dataset.candles.length,
@@ -232,6 +240,7 @@ function App() {
         setPerfWarning("大量データ（10万バー以上）です。動作が重くなる可能性があります。");
       }
       await refreshCacheInfo();
+      await refreshDatasetHistory();
     } catch (err) {
       const message = String(err || "読み込みに失敗しました").replace(/^Error:\s*/i, "");
       setIngestError(message);
@@ -382,6 +391,30 @@ function App() {
               </div>
             ) : (
               <div className="cache-meta">未取得</div>
+            )}
+          </div>
+          <div className="cache-panel">
+            <div className="panel-title">最近使ったCSV</div>
+            <div className="cache-row">
+              <button type="button" className="ghost" onClick={refreshDatasetHistory}>
+                履歴更新
+              </button>
+            </div>
+            {datasetHistory.length ? (
+              <div className="history-list">
+                {datasetHistory.map((item) => (
+                  <button
+                    key={item.path}
+                    type="button"
+                    className="list-item"
+                    onClick={() => ingestCsv(item.path)}
+                  >
+                    {item.path}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="cache-meta">履歴なし</div>
             )}
           </div>
         </aside>
