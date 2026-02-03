@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import ChartCanvas from "./ChartCanvas";
 import "./App.css";
@@ -44,6 +45,7 @@ function App() {
   const [ingestInfo, setIngestInfo] = useState(null);
   const [ingestError, setIngestError] = useState("");
   const [ingestLoading, setIngestLoading] = useState(false);
+  const [ingestStage, setIngestStage] = useState("");
   const [syncEnabled, setSyncEnabled] = useState(false);
   const [perfWarning, setPerfWarning] = useState("");
   const [cacheInfo, setCacheInfo] = useState(null);
@@ -189,6 +191,39 @@ function App() {
     const nextOffset = syncViewToSeek(active.seek, active.viewBars, active).viewOffset;
     updateRange(activePane, nextOffset, active.viewBars);
   }, [active.seek, activePane, maxBars, syncEnabled]);
+
+  const ingestRangeRef = useRef({ activePane: 0, viewBars: 240 });
+
+  useEffect(() => {
+    ingestRangeRef.current = { activePane, viewBars: active.viewBars };
+  }, [activePane, active.viewBars]);
+
+  useEffect(() => {
+    let unlisten = null;
+    listen("ingest_progress", (event) => {
+      const payload = event.payload || {};
+      setIngestStage(payload.stage || "");
+      if (payload.total !== undefined) {
+        setIngestProgress({ done: payload.done || 0, total: payload.total || 0 });
+      }
+      if (payload.stage && String(payload.stage).startsWith("error:")) {
+        setIngestError(String(payload.stage).replace("error:", "").trim());
+        setIngestLoading(false);
+      }
+      if (payload.stage === "parsed") {
+        const { activePane: paneIdx, viewBars } = ingestRangeRef.current;
+        updateRange(paneIdx, 0, viewBars);
+      }
+      if (payload.stage === "done") {
+        setIngestLoading(false);
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
 
   useEffect(() => {
     const restore = async () => {
@@ -408,18 +443,9 @@ function App() {
       await refreshCacheInfo();
       await refreshDatasetHistory();
 
-      // Background: full ingest + indicators
-      setTimeout(async () => {
-        try {
-          const full = await invoke("ingest_csv", { path: file });
-          await invoke("compute_indicators", { dataset: full.dataset });
-          setIngestProgress({ done: full.dataset.candles.length, total: full.dataset.candles.length });
-          updatePane(activePane, { rawDataset: full.dataset, bars: full.dataset.candles.length });
-          updateRange(activePane, 0, nextBars);
-        } catch (err) {
-          setIngestError(String(err));
-        }
-      }, 0);
+      // Background: async ingest + indicators with progress events
+      await invoke("ingest_csv_async", { path: file });
+      setIngestStage("queued");
     } catch (err) {
       const message = String(err || "読み込みに失敗しました").replace(/^Error:\s*/i, "");
       setIngestError(message);
@@ -566,6 +592,7 @@ function App() {
               <div>
                 ingest: {ingestProgress.done} / {ingestProgress.total}
               </div>
+              {ingestStage ? <div>stage: {ingestStage}</div> : null}
             </div>
           ) : null}
           {perfWarning ? <div className="perf-warning">{perfWarning}</div> : null}

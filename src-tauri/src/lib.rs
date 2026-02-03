@@ -8,6 +8,8 @@ mod resample;
 mod presets;
 mod logger;
 
+use tauri::Emitter;
+
 #[allow(dead_code)]
 fn _infer_interval_unused() {
     // placeholder to keep infer_interval referenced for now
@@ -56,6 +58,13 @@ struct QuickIngestResult {
     initial: Vec<core::Candle>,
 }
 
+#[derive(serde::Serialize, Clone)]
+struct IngestProgress {
+    stage: String,
+    done: usize,
+    total: usize,
+}
+
 #[tauri::command]
 fn ingest_csv_quick(
     app: tauri::AppHandle,
@@ -84,6 +93,54 @@ fn ingest_csv_quick(
         used_cache: false,
         initial,
     })
+}
+
+#[tauri::command]
+fn ingest_csv_async(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _ = app_handle.emit(
+            "ingest_progress",
+            IngestProgress {
+                stage: "start".to_string(),
+                done: 0,
+                total: 0,
+            },
+        );
+        match core::load_csv_or_tsv(&app_handle, &path) {
+            Ok(result) => {
+                let total = result.dataset.candles.len();
+                let _ = app_handle.emit(
+                    "ingest_progress",
+                    IngestProgress {
+                        stage: "parsed".to_string(),
+                        done: total,
+                        total,
+                    },
+                );
+                let _ = compute_indicators(app_handle.clone(), result.dataset.clone());
+                let _ = app_handle.emit(
+                    "ingest_progress",
+                    IngestProgress {
+                        stage: "done".to_string(),
+                        done: total,
+                        total,
+                    },
+                );
+            }
+            Err(err) => {
+                let _ = app_handle.emit(
+                    "ingest_progress",
+                    IngestProgress {
+                        stage: format!("error: {err}"),
+                        done: 0,
+                        total: 0,
+                    },
+                );
+            }
+        }
+    });
+    Ok(())
 }
 
 #[tauri::command]
@@ -263,6 +320,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ingest_csv,
             ingest_csv_quick,
+            ingest_csv_async,
             clear_cache,
             cache_status,
             list_dataset_history,
